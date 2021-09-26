@@ -13,145 +13,165 @@ struct Arc {
     time_to: usize
 }
 
-/*
-struct GlobalOpti {
-    hmm: HMM,
-    sequences: Array1<Array1<usize>>,
-    constraints: Constraints
+pub struct GlobalOpti<'a> {
+    hmm: &'a HMM,
+    sequences: &'a Array1<Array1<usize>>,
+    constraints: &'a Constraints,
+    model: Model
 }
 
-impl GlobalOpti {
+impl<'b> GlobalOpti<'b> {
 
-    pub fn new(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints) -> Self {
-        Self {hmm, sequences, constraints }
-    }
-}
-*/
-
-fn get_outflow(seq_len: usize, t: usize, state: usize, var_map: &HashMap<Arc, Var>) -> LinExpr {
-    let mut outflow = LinExpr::new();
-    if t == seq_len - 1 {
-        let arc = Arc { state_from: state, state_to: 0, time_to: t+1 };
-        match var_map.get(&arc) {
-            Some(v) => outflow = outflow.add_term(1.0, v.clone()),
-            None => ()
-        };
-    } else {
-
+    pub fn new(hmm: &'b HMM, sequences: &'b Array1<Array1<usize>>, constraints: &'b Constraints) -> Self {
+        let env = Env::new("logfile.log").unwrap();
+        let mut model = Model::new("model", &env).unwrap();
+        Self {hmm, sequences, constraints, model}
     }
 
-    outflow
-}
-
-pub fn create_model(hmm: HMM, sequences: Array1<Array1<usize>>, constraints: Constraints) -> Model {
-
-    println!("Creating the global optimisation problem");
-    let env = Env::new("logfile.log").unwrap();
-    let mut model = Model::new("model", &env).unwrap();
-
-    let mut vars = sequences.map(|_| -> HashMap<Arc, Var> { HashMap::new() });
-
-    println!("Adding the variables in the model");
-    for i in 0..sequences.len() {
-        if i % 10 == 0 {
-            println!("{}/{}", i, sequences.len());
+    fn get_outflow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
+        let mut outflow = LinExpr::new();
+        for state_to in 0..self.hmm.nstates() {
+            let arc = Arc {state_from: state, state_to, time_to: time + 1};
+            match vars.get(&arc) {
+                Some(v) => outflow = outflow.add_term(1.0, v.clone()),
+                None => ()
+            };
         }
-        let sequence = &sequences[i];
-        let mut source_flow = LinExpr::new();
-        let mut target_flow = LinExpr::new();
-        for t in 0..sequence.len() + 1 {
+        outflow
+    }
 
-            if t == 0 {
-                let p = hmm.init_prob(sequence[t]);
-                for state in 0..hmm.nstates() {
-                    let proba = *p.get(state).unwrap();
-                    if p[i] > f64::NEG_INFINITY {
-                        let arc = Arc { state_from: 0, state_to: state, time_to: t };
-                        let x = model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
-                        source_flow = source_flow.add_term(1.0, x.clone());
+    fn get_inflow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
+        let mut inflow = LinExpr::new();
+        for state_from in 0..self.hmm.nstates() {
+            let arc = Arc {state_from, state_to: state, time_to: time};
+            match vars.get(&arc) {
+                Some(v) => inflow = inflow.add_term(1.0, v.clone()),
+                None => ()
+            };
+        }
+        inflow
+    }
+
+    fn get_in_out_flow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
+        let mut in_out_flow = LinExpr::new();
+        for other_state in 0..self.hmm.nstates() {
+            let arc_in = Arc { state_from: other_state, state_to: state, time_to: time };
+            let arc_out = Arc {state_from: state, state_to: other_state, time_to: time+1};
+            match vars.get(&arc_in) {
+                Some(v) => in_out_flow = in_out_flow.add_term(1.0, v.clone()),
+                None => ()
+            };
+            match vars.get(&arc_out) {
+                Some(v) => in_out_flow = in_out_flow.add_term(-1.0, v.clone()),
+                None => ()
+            };
+        }
+        in_out_flow
+    }
+
+    pub fn build_model(&mut self) {
+
+        println!("Creating the global optimisation problem");
+
+        let mut vars = self.sequences.map(|_| -> HashMap<Arc, Var> { HashMap::new() });
+
+        println!("Adding the variables in the model");
+        for i in 0..self.sequences.len() {
+            if i % 10 == 0 {
+                println!("{}/{}", i, self.sequences.len());
+            }
+            let sequence = &self.sequences[i];
+            let mut source_flow = LinExpr::new();
+            let mut target_flow = LinExpr::new();
+            for t in 0..sequence.len() + 1 {
+
+                if t == 0 {
+                    let p = self.hmm.init_prob(sequence[t]);
+                    for state in 0..self.hmm.nstates() {
+                        let proba = *p.get(state).unwrap();
+                        if p[i] > f64::NEG_INFINITY {
+                            let arc = Arc { state_from: 0, state_to: state, time_to: t };
+                            let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
+                            source_flow = source_flow.add_term(1.0, x.clone());
+                            vars[i].insert(arc, x);
+                        }
+                    }
+                } else if t == sequence.len() {
+                    for state in 0..self.hmm.nstates() {
+                        let arc = Arc {state_from: state, state_to: 0, time_to: t};
+                        let p = 0.0;
+                        let x = self.model.add_var("", Binary, p, 0.0, 1.0, &[], &[]).unwrap();
+                        target_flow = target_flow.add_term(1.0, x.clone());
                         vars[i].insert(arc, x);
                     }
-                }
-            } else if t == sequence.len() {
-                for state in 0..hmm.nstates() {
-                    let arc = Arc {state_from: state, state_to: 0, time_to: t};
-                    let p = 0.0;
-                    let x = model.add_var("", Binary, p, 0.0, 1.0, &[], &[]).unwrap();
-                    target_flow = target_flow.add_term(1.0, x.clone());
-                    vars[i].insert(arc, x);
-                }
-            } else {
-                for state in 0..hmm.nstates() {
-                    let p = hmm.transition(state);
-                    let state_from = p.argmax().unwrap();
-                    let proba = p[state_from] + hmm.emit_prob(state, sequence[t]);
-                    if proba > f64::NEG_INFINITY {
-                        let arc = Arc {state_from, state_to: state, time_to:t};
-                        let x = model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
-                        vars[i].insert(arc, x);
+                } else {
+                    for state in 0..self.hmm.nstates() {
+                        let p = self.hmm.transition(state);
+                        let state_from = p.argmax().unwrap();
+                        let proba = p[state_from] + self.hmm.emit_prob(state, sequence[t]);
+                        if proba > f64::NEG_INFINITY {
+                            let arc = Arc {state_from, state_to: state, time_to:t};
+                            let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
+                            vars[i].insert(arc, x);
+                        }
+                        
                     }
-                    
+                }
+            }
+            match self.model.add_constr("", source_flow, Equal, 1.0) {
+                Ok(_) => (),
+                Err(error) => panic!("Can not add constraint to the model: {:?}", error)
+            };
+            match self.model.add_constr("", target_flow, Equal, 1.0) {
+                Ok(_) => (),
+                Err(error) => panic!("Can not add constraint to the model: {:?}", error)
+            };
+        }
+
+        println!("Adding the shortest path constraints");
+
+        for i in 0..self.sequences.len() {
+            let sequence = &self.sequences[i];
+            for t in 0..sequence.len() {
+                for state in 0..self.hmm.nstates() {
+                    let in_out_flow = self.get_in_out_flow(&vars[i], state, t);
+                    match self.model.add_constr("", in_out_flow, Equal, 0.0) {
+                        Ok(_) => (),
+                        Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
+                    };
+                }
+            }
+            if i % 10 == 0 {
+                println!("{}/{}", i, self.sequences.len());
+            }
+        }
+
+        println!("Adding the consistency constraints");
+        for component in &self.constraints.components {
+            for i in 0..component.len() {
+                let (s1, t1) = component[i];
+                for j in i+1..component.len() {
+                    let (s2, t2) = component[j];
+                    for state in 0..self.hmm.nstates() {
+                        let outflow_s1 = self.get_outflow(&vars[s1], state, t1);
+                        let outflow_s2 = self.get_outflow(&vars[s2], state, t2);
+                        let diff_flow = outflow_s1 - outflow_s2;
+                        match self.model.add_constr("", diff_flow, Equal, 0.0) {
+                            Ok(_) => (),
+                            Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
+                        };
+                    }
                 }
             }
         }
-        match model.add_constr("", source_flow, Equal, 1.0) {
+
+        println!("updating model");
+        match self.model.update() {
             Ok(_) => (),
-            Err(error) => panic!("Can not add constraint to the model: {:?}", error)
+            Err(error) => panic!("Can not update the model: {:?}", error)
         };
-        match model.add_constr("", target_flow, Equal, 1.0) {
-            Ok(_) => (),
-            Err(error) => panic!("Can not add constraint to the model: {:?}", error)
-        };
+        println!("Writing model");
+        self.model.write("global_opti.lp").unwrap();
     }
 
-    println!("Adding the shortest path constraints");
-
-    for i in 0..sequences.len() {
-        let sequence = &sequences[i];
-        for t in 0..sequence.len() {
-            for state in 0..hmm.nstates() {
-                let mut flow = LinExpr::new();
-
-                for other_state in 0..hmm.nstates() {
-                    let arc_from = Arc{state_from: other_state, state_to: state, time_to: t};
-                    let arc_to = Arc{state_from: other_state, state_to: state, time_to: t+1};
-                    match vars[i].get(&arc_from) {
-                        Some(v) => flow = flow.add_term(1.0, v.clone()),
-                        None => ()
-                    };
-                    match vars[i].get(&arc_to) {
-                        Some(v) => flow = flow.add_term(-1.0, v.clone()),
-                        None => ()
-                    };
-                }
-
-                match model.add_constr("", flow, Equal, 0.0) {
-                    Ok(_) => (),
-                    Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
-                };
-            }
-        }
-        if i % 10 == 0 {
-            println!("{}/{}", i, sequences.len());
-        }
-    }
-
-    println!("Adding the consistency constraints");
-    for component in constraints.components {
-        for i in 0..component.len() {
-            for j in i+1..component.len() {
-            }
-        }
-    }
-
-    println!("updating model");
-    match model.update() {
-        Ok(_) => (),
-        Err(error) => panic!("Can not update the model: {:?}", error)
-    };
-    println!("Writing model");
-    model.write("global_opti.lp").unwrap();
-
-    model
 }
-

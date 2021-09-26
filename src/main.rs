@@ -11,7 +11,7 @@ use viterbi_solver::viterbi;
 use viterbi_solver::lagrangian::Lagrangian;
 use viterbi_solver::hmm::HMM;
 use viterbi_solver::constraints::Constraints;
-use viterbi_solver::opti;
+use viterbi_solver::opti::GlobalOpti;
 
 fn log(n: &f64) -> f64 {
     if *n == 0.0 {
@@ -49,6 +49,11 @@ fn lagrangian(hmm: HMM, sequences: Vec<Array1<usize>>, constraints: Constraints)
     lagrangian.solve();
 }
 
+fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints) {
+    let mut model = GlobalOpti::new(hmm, sequences, constraints);
+    model.build_model();
+}
+
 fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>) -> f64 {
     let mut errors = 0.0;
     let mut total = 0.0;
@@ -77,13 +82,15 @@ fn main() {
     println!("Loading sequences");
     let sequences = utils::load_sequences("data/sentences_reduced.in");
     let tags = utils::load_sequences("data/tags_reduced.in");
-    let predictions = viterbi(hmm, &sequences);
-    let e = error_rate(&predictions, &tags);
-    println!("Error rate {}", e);
+    //let predictions = viterbi(hmm, &sequences);
+    //let e = error_rate(&predictions, &tags);
+    //println!("Error rate {}", e);
 
-    //println!("Loading constraints");
-    //let constraints = Constraints::from_file("data/constraints.in");
+    println!("Loading constraints");
+    let constraints = Constraints::from_file("data/constraints.in");
 
     //lagrangian(hmm, sequences, constraints);
     //let model = opti::create_model(hmm, sequences);
+
+    global_opti(&hmm, &sequences, &constraints);
 }

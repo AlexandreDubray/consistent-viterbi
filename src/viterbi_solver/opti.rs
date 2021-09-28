@@ -139,21 +139,32 @@ impl<'b> GlobalOpti<'b> {
 
         println!("Adding the consistency constraints");
         for component in &self.constraints.components {
-            for i in 0..component.len() {
+            for i in 0..component.len()-1 {
                 let (s1, t1) = component[i];
-                for j in i+1..component.len() {
-                    let (s2, t2) = component[j];
-                    for state in 0..self.hmm.nstates() {
-                        if self.hmm.can_emit(state, self.sequences[s1][t1], t1) && self.hmm.can_emit(state, self.sequences[s2][t2], t2) {
-                            //println!("{} {} {} {}", s2, state, t2, self.hmm.emit_prob(state, self.sequences[s2][t2]));
-                            let inflow_s1 = inflow_map.get(&(s1, state, t1)).unwrap().clone();
-                            let inflow_s2 = inflow_map.get(&(s2, state, t2)).unwrap().clone();
-                            let diff_flow = inflow_s1 - inflow_s2;
-                            match self.model.add_constr("", diff_flow, Equal, 0.0) {
-                                Ok(_) => (),
-                                Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
-                            };
-                        }
+                let (s2, t2) = component[i+1];
+                for state in 0..self.hmm.nstates() {
+                    // TODO: get inflow of LinExpr::new() if not present then add cstr
+                    let mut found = false;
+                    let inflow_s1 = match inflow_map.get(&(s1, state, t1)) {
+                        Some(f) => {
+                            found = true;
+                            f.clone()
+                        },
+                        None => LinExpr::new()
+                    };
+                    let inflow_s2 = match inflow_map.get(&(s2, state, t2)) {
+                        Some(f) => {
+                            found = true;
+                            f.clone()
+                        },
+                        None => LinExpr::new()
+                    };
+                    if found {
+                        let diff_flow = inflow_s1 - inflow_s2;
+                        match self.model.add_constr("", diff_flow, Equal, 0.0) {
+                            Ok(_) => (),
+                            Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
+                        };
                     }
                 }
             }

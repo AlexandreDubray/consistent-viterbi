@@ -125,11 +125,13 @@ impl<'b> GlobalOpti<'b> {
             let sequence = &self.sequences[i];
             for t in 0..sequence.len() {
                 for state in 0..self.hmm.nstates() {
-                    let in_out_flow = self.get_in_out_flow(&self.vars[i], state, t);
-                    match self.model.add_constr("", in_out_flow, Equal, 0.0) {
-                        Ok(_) => (),
-                        Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
-                    };
+                    if self.hmm.can_emit(state, sequence[t]) {
+                        let in_out_flow = self.get_in_out_flow(&self.vars[i], state, t);
+                        match self.model.add_constr("", in_out_flow, Equal, 0.0) {
+                            Ok(_) => (),
+                            Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
+                        };
+                    }
                 }
             }
             if i % 10 == 0 {

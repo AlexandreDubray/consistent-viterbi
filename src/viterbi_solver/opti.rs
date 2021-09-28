@@ -40,18 +40,6 @@ impl<'b> GlobalOpti<'b> {
         outflow
     }
 
-    fn get_inflow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
-        let mut inflow = LinExpr::new();
-        for state_from in 0..self.hmm.nstates() {
-            let arc = Arc {state_from, state_to: state, time_to: time};
-            match vars.get(&arc) {
-                Some(v) => inflow = inflow.add_term(1.0, v.clone()),
-                None => ()
-            };
-        }
-        inflow
-    }
-
     fn get_in_out_flow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
         let mut in_out_flow = LinExpr::new();
         for other_state in 0..self.hmm.nstates() {
@@ -88,8 +76,8 @@ impl<'b> GlobalOpti<'b> {
                 if t == 0 {
                     let p = self.hmm.init_prob(sequence[t]);
                     for state in 0..self.hmm.nstates() {
-                        let proba = *p.get(state).unwrap();
-                        if p[i] > f64::NEG_INFINITY {
+                        let proba = p[state];
+                        if proba > f64::NEG_INFINITY {
                             let arc = Arc { state_from: 0, state_to: state, time_to: t };
                             let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
                             source_flow = source_flow.add_term(1.0, x.clone());
@@ -106,15 +94,18 @@ impl<'b> GlobalOpti<'b> {
                     }
                 } else {
                     for state in 0..self.hmm.nstates() {
-                        let p = self.hmm.transition(state);
-                        let state_from = p.argmax().unwrap();
-                        let proba = p[state_from] + self.hmm.emit_prob(state, sequence[t]);
-                        if proba > f64::NEG_INFINITY {
-                            let arc = Arc {state_from, state_to: state, time_to:t};
-                            let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
-                            vars[i].insert(arc, x);
+                        let emit_prob = self.hmm.emit_prob(state, sequence[t]);
+                        if emit_prob > f64::NEG_INFINITY {
+                            let transition_probs = self.hmm.transition(state);
+                            for state_from in 0..self.hmm.nstates() {
+                                let proba = transition_probs[state_from] + emit_prob;
+                                if proba > f64::NEG_INFINITY {
+                                    let arc = Arc {state_from, state_to: state, time_to:t};
+                                    let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
+                                    vars[i].insert(arc, x);
+                                }
+                            }
                         }
-                        
                     }
                 }
             }

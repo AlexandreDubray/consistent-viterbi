@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader};
 use std::fs::File;
+use ndarray::Array1;
 
 struct ConsistencyConstraint {
     seq_id_from: usize,
@@ -9,7 +10,7 @@ struct ConsistencyConstraint {
 }
 
 pub struct Constraints {
-    pub components: Vec<Vec<(usize, usize)>>
+    pub components: Array1<Vec<(usize, usize)>>
 }
 
 impl Constraints {
@@ -46,7 +47,10 @@ impl Constraints {
                 component.push((seq_id, timestamp));
             }
         }
-        Self { components }
+        if component.len() > 0 {
+            components.push(component);
+        }
+        Self { components: Array1::from_vec(components) }
     }
 
     pub fn get_component(&self, idx: usize) -> &Vec<(usize, usize)> {

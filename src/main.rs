@@ -49,9 +49,13 @@ fn lagrangian(hmm: HMM, sequences: Vec<Array1<usize>>, constraints: Constraints)
     lagrangian.solve();
 }
 
-fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints) {
+fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints) -> Array1<Array1<usize>> {
     let mut model = GlobalOpti::new(hmm, sequences, constraints);
     model.build_model();
+    model.solve();
+    let predictions = model.get_solutions();
+    utils::write_outputs("predictions_global_opti.out", &predictions);
+    predictions
 }
 
 fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>) -> f64 {
@@ -87,10 +91,12 @@ fn main() {
     //println!("Error rate {}", e);
 
     println!("Loading constraints");
-    let constraints = Constraints::from_file("data/constraints.in");
+    let constraints = Constraints::from_file("data/constraints_reduced.in");
 
     //lagrangian(hmm, sequences, constraints);
     //let model = opti::create_model(hmm, sequences);
 
-    global_opti(&hmm, &sequences, &constraints);
+    let predictions = global_opti(&hmm, &sequences, &constraints);
+    let e = error_rate(&predictions, &tags);
+    println!("Error rate {}", e);
 }

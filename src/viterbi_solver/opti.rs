@@ -1,6 +1,5 @@
 use gurobi::*;
 use ndarray::Array1;
-use ndarray_stats::QuantileExt;
 use std::collections::HashMap;
 
 use super::hmm::HMM;
@@ -17,15 +16,17 @@ pub struct GlobalOpti<'a> {
     hmm: &'a HMM,
     sequences: &'a Array1<Array1<usize>>,
     constraints: &'a Constraints,
-    model: Model
+    model: Model,
+    vars: Array1<HashMap<Arc, Var>>
 }
 
 impl<'b> GlobalOpti<'b> {
 
     pub fn new(hmm: &'b HMM, sequences: &'b Array1<Array1<usize>>, constraints: &'b Constraints) -> Self {
         let env = Env::new("logfile.log").unwrap();
-        let mut model = Model::new("model", &env).unwrap();
-        Self {hmm, sequences, constraints, model}
+        let model = Model::new("model", &env).unwrap();
+        let vars = sequences.map(|_| -> HashMap<Arc, Var> { HashMap::new() });
+        Self {hmm, sequences, constraints, model, vars}
     }
 
     fn get_outflow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
@@ -61,7 +62,6 @@ impl<'b> GlobalOpti<'b> {
 
         println!("Creating the global optimisation problem");
 
-        let mut vars = self.sequences.map(|_| -> HashMap<Arc, Var> { HashMap::new() });
 
         println!("Adding the variables in the model");
         for i in 0..self.sequences.len() {
@@ -81,7 +81,7 @@ impl<'b> GlobalOpti<'b> {
                             let arc = Arc { state_from: 0, state_to: state, time_to: t };
                             let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
                             source_flow = source_flow.add_term(1.0, x.clone());
-                            vars[i].insert(arc, x);
+                            self.vars[i].insert(arc, x);
                         }
                     }
                 } else if t == sequence.len() {
@@ -90,7 +90,7 @@ impl<'b> GlobalOpti<'b> {
                         let p = 0.0;
                         let x = self.model.add_var("", Binary, p, 0.0, 1.0, &[], &[]).unwrap();
                         target_flow = target_flow.add_term(1.0, x.clone());
-                        vars[i].insert(arc, x);
+                        self.vars[i].insert(arc, x);
                     }
                 } else {
                     for state in 0..self.hmm.nstates() {
@@ -102,7 +102,7 @@ impl<'b> GlobalOpti<'b> {
                                 if proba > f64::NEG_INFINITY {
                                     let arc = Arc {state_from, state_to: state, time_to:t};
                                     let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
-                                    vars[i].insert(arc, x);
+                                    self.vars[i].insert(arc, x);
                                 }
                             }
                         }
@@ -125,7 +125,7 @@ impl<'b> GlobalOpti<'b> {
             let sequence = &self.sequences[i];
             for t in 0..sequence.len() {
                 for state in 0..self.hmm.nstates() {
-                    let in_out_flow = self.get_in_out_flow(&vars[i], state, t);
+                    let in_out_flow = self.get_in_out_flow(&self.vars[i], state, t);
                     match self.model.add_constr("", in_out_flow, Equal, 0.0) {
                         Ok(_) => (),
                         Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
@@ -146,8 +146,8 @@ impl<'b> GlobalOpti<'b> {
                     let (s2, t2) = component[j];
                     for state in 0..self.hmm.nstates() {
                         if self.hmm.can_emit(state, self.sequences[s1][t1]) && self.hmm.can_emit(state, self.sequences[s2][t2]) {
-                            let outflow_s1 = outflow_map.entry((s1, state, t1)).or_insert(self.get_outflow(&vars[s1], state, t1)).clone();
-                            let outflow_s2 = outflow_map.entry((s2, state, t2)).or_insert(self.get_outflow(&vars[s2], state, t2)).clone();
+                            let outflow_s1 = outflow_map.entry((s1, state, t1)).or_insert(self.get_outflow(&self.vars[s1], state, t1)).clone();
+                            let outflow_s2 = outflow_map.entry((s2, state, t2)).or_insert(self.get_outflow(&self.vars[s2], state, t2)).clone();
                             let diff_flow = outflow_s1 - outflow_s2;
                             match self.model.add_constr("", diff_flow, Equal, 0.0) {
                                 Ok(_) => (),
@@ -166,6 +166,40 @@ impl<'b> GlobalOpti<'b> {
         };
         println!("Writing model");
         self.model.write("global_opti.lp").unwrap();
+    }
+
+    pub fn solve(&mut self) {
+        match self.model.optimize() {
+            Ok(_) => (),
+            Err(error) => panic!("Could not solve the model: {:?}", error)
+        };
+    }
+
+    fn get_solution(&self, seq_id: usize) -> Array1<usize> {
+        let mut sol = Array1::zeros(self.sequences[seq_id].len());
+        let vs = &self.vars[seq_id];
+        let mut state_from = 0;
+        for t in 0..sol.len() {
+            for state in 0..self.hmm.nstates() {
+                let arc = Arc {state_from, state_to: state, time_to: t};
+                match vs.get(&arc) {
+                    Some(v) => {
+                        let value = self.model.get_values(attr::X, &[v.clone()]).unwrap()[0];
+                        if value == 1.0 {
+                            sol[t] = state;
+                            state_from = state;
+                            continue;
+                        }
+                    },
+                    None => ()
+                };
+            }
+        }
+        sol
+    }
+
+    pub fn get_solutions(&self)  -> Array1<Array1<usize>> {
+        Array1::from_iter(0..self.sequences.len()).map(|seq_id| -> Array1<usize> { self.get_solution(*seq_id) })
     }
 
 }

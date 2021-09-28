@@ -138,20 +138,22 @@ impl<'b> GlobalOpti<'b> {
         }
 
         println!("Adding the consistency constraints");
-        let mut outflow_map: HashMap<(usize, usize, usize), LinExpr> = HashMap::new();
         for component in &self.constraints.components {
+            let mut outflow_map: HashMap<(usize, usize, usize), LinExpr> = HashMap::new();
             for i in 0..component.len() {
                 let (s1, t1) = component[i];
                 for j in i+1..component.len() {
                     let (s2, t2) = component[j];
                     for state in 0..self.hmm.nstates() {
-                        let outflow_s1 = outflow_map.entry((s1, state, t1)).or_insert(self.get_outflow(&vars[s1], state, t1)).clone();
-                        let outflow_s2 = outflow_map.entry((s2, state, t2)).or_insert(self.get_outflow(&vars[s2], state, t2)).clone();
-                        let diff_flow = outflow_s1 - outflow_s2;
-                        match self.model.add_constr("", diff_flow, Equal, 0.0) {
-                            Ok(_) => (),
-                            Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
-                        };
+                        if self.hmm.can_emit(state, self.sequences[s1][t1]) && self.hmm.can_emit(state, self.sequences[s2][t2]) {
+                            let outflow_s1 = outflow_map.entry((s1, state, t1)).or_insert(self.get_outflow(&vars[s1], state, t1)).clone();
+                            let outflow_s2 = outflow_map.entry((s2, state, t2)).or_insert(self.get_outflow(&vars[s2], state, t2)).clone();
+                            let diff_flow = outflow_s1 - outflow_s2;
+                            match self.model.add_constr("", diff_flow, Equal, 0.0) {
+                                Ok(_) => (),
+                                Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
+                            };
+                        }
                     }
                 }
             }

@@ -29,18 +29,6 @@ impl<'b> GlobalOpti<'b> {
         Self {hmm, sequences, constraints, model, vars}
     }
 
-    fn get_outflow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
-        let mut outflow = LinExpr::new();
-        for state_to in 0..self.hmm.nstates() {
-            let arc = Arc {state_from: state, state_to, time_to: time + 1};
-            match vars.get(&arc) {
-                Some(v) => outflow = outflow.add_term(1.0, v.clone()),
-                None => ()
-            };
-        }
-        outflow
-    }
-
     fn get_in_out_flow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
         let mut in_out_flow = LinExpr::new();
         for other_state in 0..self.hmm.nstates() {
@@ -64,6 +52,7 @@ impl<'b> GlobalOpti<'b> {
 
 
         println!("Adding the variables in the model");
+        let mut inflow_map: HashMap<(usize, usize, usize), LinExpr> = HashMap::new();
         for i in 0..self.sequences.len() {
             if i % 10 == 0 {
                 println!("{}/{}", i, self.sequences.len());
@@ -81,6 +70,12 @@ impl<'b> GlobalOpti<'b> {
                             let arc = Arc { state_from: 0, state_to: state, time_to: t };
                             let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
                             source_flow = source_flow.add_term(1.0, x.clone());
+                            let mut inflow = LinExpr::new();
+                            inflow = inflow.add_term(1.0, x.clone());
+                            if i == 64 && state == 312 {
+                                println!("DEBUGGG");
+                            }
+                            inflow_map.insert((i, state, t), inflow);
                             self.vars[i].insert(arc, x);
                         }
                     }
@@ -97,14 +92,17 @@ impl<'b> GlobalOpti<'b> {
                         let emit_prob = self.hmm.emit_prob(state, sequence[t]);
                         if emit_prob > f64::NEG_INFINITY {
                             let transition_probs = self.hmm.transition(state);
+                            let mut inflow = LinExpr::new();
                             for state_from in 0..self.hmm.nstates() {
                                 let proba = transition_probs[state_from] + emit_prob;
                                 if proba > f64::NEG_INFINITY {
                                     let arc = Arc {state_from, state_to: state, time_to:t};
                                     let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
+                                    inflow = inflow.add_term(1.0, x.clone());
                                     self.vars[i].insert(arc, x);
                                 }
                             }
+                            inflow_map.insert((i, state, t), inflow);
                         }
                     }
                 }
@@ -125,7 +123,7 @@ impl<'b> GlobalOpti<'b> {
             let sequence = &self.sequences[i];
             for t in 0..sequence.len() {
                 for state in 0..self.hmm.nstates() {
-                    if self.hmm.can_emit(state, sequence[t]) {
+                    if self.hmm.can_emit(state, sequence[t], t) {
                         let in_out_flow = self.get_in_out_flow(&self.vars[i], state, t);
                         match self.model.add_constr("", in_out_flow, Equal, 0.0) {
                             Ok(_) => (),
@@ -141,16 +139,16 @@ impl<'b> GlobalOpti<'b> {
 
         println!("Adding the consistency constraints");
         for component in &self.constraints.components {
-            let mut outflow_map: HashMap<(usize, usize, usize), LinExpr> = HashMap::new();
             for i in 0..component.len() {
                 let (s1, t1) = component[i];
                 for j in i+1..component.len() {
                     let (s2, t2) = component[j];
                     for state in 0..self.hmm.nstates() {
-                        if self.hmm.can_emit(state, self.sequences[s1][t1]) && self.hmm.can_emit(state, self.sequences[s2][t2]) {
-                            let outflow_s1 = outflow_map.entry((s1, state, t1)).or_insert(self.get_outflow(&self.vars[s1], state, t1)).clone();
-                            let outflow_s2 = outflow_map.entry((s2, state, t2)).or_insert(self.get_outflow(&self.vars[s2], state, t2)).clone();
-                            let diff_flow = outflow_s1 - outflow_s2;
+                        if self.hmm.can_emit(state, self.sequences[s1][t1], t1) && self.hmm.can_emit(state, self.sequences[s2][t2], t2) {
+                            //println!("{} {} {} {}", s2, state, t2, self.hmm.emit_prob(state, self.sequences[s2][t2]));
+                            let inflow_s1 = inflow_map.get(&(s1, state, t1)).unwrap().clone();
+                            let inflow_s2 = inflow_map.get(&(s2, state, t2)).unwrap().clone();
+                            let diff_flow = inflow_s1 - inflow_s2;
                             match self.model.add_constr("", diff_flow, Equal, 0.0) {
                                 Ok(_) => (),
                                 Err(error) => panic!("Cannot add constraint to the model: {:?}", error)

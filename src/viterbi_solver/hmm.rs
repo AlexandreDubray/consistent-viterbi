@@ -40,7 +40,11 @@ impl HMM {
         self.b[[state, obs]]
     }
 
-    pub fn can_emit(&self, state: usize, obs: usize) -> bool {
-        self.emit_prob(state, obs) > f64::NEG_INFINITY
+    pub fn can_emit(&self, state: usize, obs: usize, t: usize) -> bool {
+        if t == 0 {
+            self.pi[state] + self.emit_prob(state, obs) > f64::NEG_INFINITY
+        } else {
+            self.emit_prob(state, obs) > f64::NEG_INFINITY
+        }
     }
 }

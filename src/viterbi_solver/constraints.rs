@@ -38,8 +38,10 @@ impl Constraints {
                 Err(error) => panic!("Error while reading file at line {:?}", error),
             };
             if line == "" {
-                components.push(component);
-                component = Vec::new();
+                if component.len() > 0 {
+                    components.push(component);
+                    component = Vec::new();
+                }
             } else {
                 let mut split = line.split_whitespace();
                 let seq_id = Constraints::parse_usize(split.next().unwrap());

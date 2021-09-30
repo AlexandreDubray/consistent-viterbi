@@ -37,10 +37,7 @@ fn array_to_str(a: &Array1<usize>) -> String {
 }
 
 pub fn write_outputs(path: &PathBuf, outputs: &Array1<Array1<usize>>) {
-    let mut file = match File::create(path) {
-        Ok(f) => f,
-        Err(error) => panic!("Can not create file {}. {:?}", path, error),
-    };
+    let mut file = File::create(path).unwrap();
     for output in outputs {
         file.write(array_to_str(output).as_bytes()).expect("Can not write");
         file.write("\n".as_bytes()).expect("Can not write");

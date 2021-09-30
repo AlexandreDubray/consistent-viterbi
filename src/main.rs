@@ -1,6 +1,7 @@
 use ndarray::Array1;
 
 use std::time::Instant;
+use std::env;
 
 mod utils;
 mod viterbi_solver;
@@ -12,6 +13,7 @@ use viterbi_solver::lagrangian::Lagrangian;
 use viterbi_solver::hmm::HMM;
 use viterbi_solver::constraints::Constraints;
 use viterbi_solver::opti::GlobalOpti;
+use viterbi_solver::local_search::LocalSearch;
 
 fn log(n: &f64) -> f64 {
     if *n == 0.0 {
@@ -27,7 +29,7 @@ fn viterbi(hmm: HMM, sequences: &Array1<Array1<usize>>) -> Array1<Array1<usize>>
         max_seq_size = max_seq_size.max(sequence.len());
     }
 
-    let mut viterbi = viterbi::Viterbi::new(hmm, max_seq_size);
+    let mut viterbi = viterbi::Viterbi::new(&hmm, max_seq_size);
     let start = Instant::now();
     println!("Start of the predictions");
     let predictions = sequences.map(|sequence| -> Array1<usize> { viterbi.solve(&sequence) });
@@ -75,28 +77,33 @@ fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>
 
 fn main() {
 
-    let nstates = 472;
-    let nobs = 56057;
+    let args: Vec<String> = env::args().collect();
+
+    let method = &args[1];
+    let nstates = &args[2].parse::<usize>().unwrap();
+    let nobs = &args[3].parse::<usize>().unwrap();
 
     println!("Loading matrices");
-    let transmat = utils::read_matrix("data/transmat", nstates, nstates).map(log);
-    let emissionprob = utils::read_matrix("data/emissionmat", nstates, nobs).map(log);
-    let pi = utils::read_matrix("data/pi", 1, nstates).row(0).map(log);
+    let transmat = utils::read_matrix("data/HMM/transmat", *nstates, *nstates).map(log);
+    let emissionprob = utils::read_matrix("data/HMM/emissionmat", *nstates, *nobs).map(log);
+    let pi = utils::read_matrix("data/HMM/pi", 1, *nstates).row(0).map(log);
     let hmm = HMM::new(transmat, emissionprob, pi);
     println!("Loading sequences");
-    let sequences = utils::load_sequences("data/sentences_reduced.in");
-    let tags = utils::load_sequences("data/tags_reduced.in");
-    //let predictions = viterbi(hmm, &sequences);
-    //let e = error_rate(&predictions, &tags);
-    //println!("Error rate {}", e);
+    let sequences = utils::load_sequences("data/sentences_1.in");
+    let tags = utils::load_sequences("data/tags_1.in");
 
     println!("Loading constraints");
-    let constraints = Constraints::from_file("data/constraints_reduced.in");
+    let constraints = Constraints::from_file("data/constraints_1_15.in");
 
-    //lagrangian(hmm, sequences, constraints);
-    //let model = opti::create_model(hmm, sequences);
-
-    let predictions = global_opti(&hmm, &sequences, &constraints);
+    let predictions = {
+        if method == "viterbi" {
+            viterbi(hmm, &sequences)
+        } else if method == "global_opti" {
+            global_opti(&hmm, &sequences, &constraints)
+        } else {
+            panic!("Unknown solving method: {}", method)
+        }
+    };
     let e = error_rate(&predictions, &tags);
     println!("Error rate {}", e);
 }

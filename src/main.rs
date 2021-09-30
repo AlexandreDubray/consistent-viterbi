@@ -21,6 +21,7 @@ struct Cli {
     input_path: std::path::PathBuf,
     nstates: usize,
     nobs: usize,
+    prop_consistency_cstr: f64
 }
 
 
@@ -59,9 +60,9 @@ fn lagrangian(hmm: HMM, sequences: Vec<Array1<usize>>, constraints: Constraints)
     lagrangian.solve();
 }
 
-fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints) -> Array1<Array1<usize>> {
+fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, prop_consistency_cstr: f64) -> Array1<Array1<usize>> {
     let mut model = GlobalOpti::new(hmm, sequences, constraints);
-    model.build_model();
+    model.build_model(prop_consistency_cstr);
     model.solve();
     let predictions = model.get_solutions();
     predictions
@@ -108,7 +109,7 @@ fn main() {
         if args.method == "viterbi" {
             viterbi(hmm, &sequences)
         } else if args.method == "global_opti" {
-            global_opti(&hmm, &sequences, &constraints)
+            global_opti(&hmm, &sequences, &constraints, args.prop_consistency_cstr)
         } else {
             panic!("Unknown solving method: {}", args.method)
         }

@@ -1,6 +1,7 @@
 use gurobi::*;
 use ndarray::Array1;
 use std::collections::HashMap;
+use rand::Rng;
 
 use super::hmm::HMM;
 use super::constraints::Constraints;
@@ -42,7 +43,7 @@ impl<'b> GlobalOpti<'b> {
         in_out_flow
     }
 
-    pub fn build_model(&mut self) {
+    pub fn build_model(&mut self, prop_consistency_cstr: f64) {
 
         println!("Creating the global optimisation problem");
 
@@ -133,33 +134,37 @@ impl<'b> GlobalOpti<'b> {
             }
         }
 
+        let mut rng = rand::thread_rng();
         println!("Adding the consistency constraints");
         for component in &self.constraints.components {
             for i in 0..component.len()-1 {
-                let (s1, t1) = component[i];
-                let (s2, t2) = component[i+1];
-                for state in 0..self.hmm.nstates() {
-                    let mut found = false;
-                    let inflow_s1 = match inflow_map.get(&(s1, state, t1)) {
-                        Some(f) => {
-                            found = true;
-                            f.clone()
-                        },
-                        None => LinExpr::new()
-                    };
-                    let inflow_s2 = match inflow_map.get(&(s2, state, t2)) {
-                        Some(f) => {
-                            found = true;
-                            f.clone()
-                        },
-                        None => LinExpr::new()
-                    };
-                    if found {
-                        let diff_flow = inflow_s1 - inflow_s2;
-                        match self.model.add_constr("", diff_flow, Equal, 0.0) {
-                            Ok(_) => (),
-                            Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
+                let x: f64 = rng.gen();
+                if x <= prop_consistency_cstr {
+                    let (s1, t1) = component[i];
+                    let (s2, t2) = component[i+1];
+                    for state in 0..self.hmm.nstates() {
+                        let mut found = false;
+                        let inflow_s1 = match inflow_map.get(&(s1, state, t1)) {
+                            Some(f) => {
+                                found = true;
+                                f.clone()
+                            },
+                            None => LinExpr::new()
                         };
+                        let inflow_s2 = match inflow_map.get(&(s2, state, t2)) {
+                            Some(f) => {
+                                found = true;
+                                f.clone()
+                            },
+                            None => LinExpr::new()
+                        };
+                        if found {
+                            let diff_flow = inflow_s1 - inflow_s2;
+                            match self.model.add_constr("", diff_flow, Equal, 0.0) {
+                                Ok(_) => (),
+                                Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
+                            };
+                        }
                     }
                 }
             }

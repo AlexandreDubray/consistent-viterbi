@@ -38,10 +38,10 @@ impl Constraints {
                 Err(error) => panic!("Error while reading file at line {:?}", error),
             };
             if line == "" {
-                if component.len() > 0 {
+                if component.len() > 1 {
                     components.push(component);
-                    component = Vec::new();
                 }
+                component = Vec::new();
             } else {
                 let mut split = line.split_whitespace();
                 let seq_id = Constraints::parse_usize(split.next().unwrap());
@@ -49,7 +49,7 @@ impl Constraints {
                 component.push((seq_id, timestamp));
             }
         }
-        if component.len() > 0 {
+        if component.len() > 1 {
             components.push(component);
         }
         Self { components: Array1::from_vec(components) }

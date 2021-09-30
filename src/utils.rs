@@ -4,21 +4,16 @@ use ndarray_csv::Array2Reader;
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 
-pub fn read_matrix(filename: &str, nrows: usize, ncols: usize) -> Array2<f64> {
-    let file = match File::open(filename) {
-        Ok(f) => f,
-        Err(error) => panic!("Unable to open file {:?}. {:?}", filename, error),
-    };
+pub fn read_matrix(path: &PathBuf, nrows: usize, ncols: usize) -> Array2<f64> {
+    let file = File::open(path).unwrap();
     let mut reader = ReaderBuilder::new().has_headers(false).from_reader(file);
-    match reader.deserialize_array2((nrows, ncols)) {
-        Ok(a) => a,
-        Err(error) => panic!("Unable to parse matrix in file {:?}. {:?}", filename, error),
-    }
+    reader.deserialize_array2((nrows, ncols)).unwrap()
 }
 
-pub fn load_sequences(filename: &str) -> Array1<Array1<usize>> {
-    let file = File::open(filename).unwrap();
+pub fn load_sequences(path: &PathBuf) -> Array1<Array1<usize>> {
+    let file = File::open(path).unwrap();
     let reader = BufReader::new(file);
 
     let mut ret: Vec<Array1<usize>> = Vec::new();
@@ -41,10 +36,10 @@ fn array_to_str(a: &Array1<usize>) -> String {
     s
 }
 
-pub fn write_outputs(filename: &str, outputs: &Array1<Array1<usize>>) {
-    let mut file = match File::create(filename) {
+pub fn write_outputs(path: &PathBuf, outputs: &Array1<Array1<usize>>) {
+    let mut file = match File::create(path) {
         Ok(f) => f,
-        Err(error) => panic!("Can not create file {}. {:?}", filename, error),
+        Err(error) => panic!("Can not create file {}. {:?}", path, error),
     };
     for output in outputs {
         file.write(array_to_str(output).as_bytes()).expect("Can not write");

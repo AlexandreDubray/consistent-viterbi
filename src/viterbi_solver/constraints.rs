@@ -1,4 +1,5 @@
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::fs::File;
 use ndarray::Array1;
 
@@ -22,11 +23,8 @@ impl Constraints {
         }
     }
 
-    pub fn from_file(filename: &str) -> Self {
-        let file = match File::open(filename) {
-            Ok(f) => f,
-            Err(error) => panic!("Unable to open constraints file {}: {:?}", filename, error)
-        };
+    pub fn from_file(path: &PathBuf) -> Self {
+        let file = File::open(path).unwrap();
         let reader = BufReader::new(file);
         // Each component is separated by an empty line
         let mut component: Vec<(usize, usize)> = Vec::new();

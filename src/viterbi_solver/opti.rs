@@ -5,12 +5,8 @@ use std::collections::HashMap;
 use super::hmm::HMM;
 use super::constraints::Constraints;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Arc {
-    state_from: usize,
-    state_to: usize,
-    time_to: usize
-}
+// (state_from, state_to, time_to)
+type Arc = (usize, usize, usize);
 
 pub struct GlobalOpti<'a> {
     hmm: &'a HMM,
@@ -32,8 +28,8 @@ impl<'b> GlobalOpti<'b> {
     fn get_in_out_flow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
         let mut in_out_flow = LinExpr::new();
         for other_state in 0..self.hmm.nstates() {
-            let arc_in = Arc { state_from: other_state, state_to: state, time_to: time };
-            let arc_out = Arc {state_from: state, state_to: other_state, time_to: time+1};
+            let arc_in = (other_state, state, time);
+            let arc_out = (state, other_state, time+1);
             match vars.get(&arc_in) {
                 Some(v) => in_out_flow = in_out_flow.add_term(1.0, v.clone()),
                 None => ()
@@ -53,6 +49,7 @@ impl<'b> GlobalOpti<'b> {
 
         println!("Adding the variables in the model");
         let mut inflow_map: HashMap<(usize, usize, usize), LinExpr> = HashMap::new();
+        let mut objective = LinExpr::new();
         for i in 0..self.sequences.len() {
             if i % 10 == 0 {
                 println!("{}/{}", i, self.sequences.len());
@@ -67,23 +64,21 @@ impl<'b> GlobalOpti<'b> {
                     for state in 0..self.hmm.nstates() {
                         let proba = p[state];
                         if proba > f64::NEG_INFINITY {
-                            let arc = Arc { state_from: 0, state_to: state, time_to: t };
-                            let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
+                            let arc = (0, state, t);
+                            let x = self.model.add_var("", Continuous, proba, 0.0, 1.0, &[], &[]).unwrap();
                             source_flow = source_flow.add_term(1.0, x.clone());
+                            objective = objective.add_term(proba, x.clone());
                             let mut inflow = LinExpr::new();
                             inflow = inflow.add_term(1.0, x.clone());
-                            if i == 64 && state == 312 {
-                                println!("DEBUGGG");
-                            }
                             inflow_map.insert((i, state, t), inflow);
                             self.vars[i].insert(arc, x);
                         }
                     }
                 } else if t == sequence.len() {
                     for state in 0..self.hmm.nstates() {
-                        let arc = Arc {state_from: state, state_to: 0, time_to: t};
+                        let arc = (state, 0, t);
                         let p = 0.0;
-                        let x = self.model.add_var("", Binary, p, 0.0, 1.0, &[], &[]).unwrap();
+                        let x = self.model.add_var("", Continuous, p, 0.0, 1.0, &[], &[]).unwrap();
                         target_flow = target_flow.add_term(1.0, x.clone());
                         self.vars[i].insert(arc, x);
                     }
@@ -96,9 +91,10 @@ impl<'b> GlobalOpti<'b> {
                             for state_from in 0..self.hmm.nstates() {
                                 let proba = transition_probs[state_from] + emit_prob;
                                 if proba > f64::NEG_INFINITY {
-                                    let arc = Arc {state_from, state_to: state, time_to:t};
-                                    let x = self.model.add_var("", Binary, proba, 0.0, 1.0, &[], &[]).unwrap();
+                                    let arc = (state_from, state, t);
+                                    let x = self.model.add_var("", Continuous, proba, 0.0, 1.0, &[], &[]).unwrap();
                                     inflow = inflow.add_term(1.0, x.clone());
+                                    objective = objective.add_term(proba, x.clone());
                                     self.vars[i].insert(arc, x);
                                 }
                             }
@@ -143,7 +139,6 @@ impl<'b> GlobalOpti<'b> {
                 let (s1, t1) = component[i];
                 let (s2, t2) = component[i+1];
                 for state in 0..self.hmm.nstates() {
-                    // TODO: get inflow of LinExpr::new() if not present then add cstr
                     let mut found = false;
                     let inflow_s1 = match inflow_map.get(&(s1, state, t1)) {
                         Some(f) => {
@@ -175,6 +170,7 @@ impl<'b> GlobalOpti<'b> {
             Ok(_) => (),
             Err(error) => panic!("Can not update the model: {:?}", error)
         };
+        self.model.set_objective(objective, Maximize).unwrap();
         println!("Writing model");
         self.model.write("global_opti.lp").unwrap();
     }
@@ -192,14 +188,15 @@ impl<'b> GlobalOpti<'b> {
         let mut state_from = 0;
         for t in 0..sol.len() {
             for state in 0..self.hmm.nstates() {
-                let arc = Arc {state_from, state_to: state, time_to: t};
+                let arc = (state_from, state, t);
                 match vs.get(&arc) {
                     Some(v) => {
                         let value = self.model.get_values(attr::X, &[v.clone()]).unwrap()[0];
+                        assert!(value == 1.0 || value == 0.0);
                         if value == 1.0 {
                             sol[t] = state;
                             state_from = state;
-                            continue;
+                            break;
                         }
                     },
                     None => ()

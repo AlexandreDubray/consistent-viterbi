@@ -5,6 +5,7 @@ use std::env;
 
 mod utils;
 mod viterbi_solver;
+mod lp_exp;
 
 use viterbi_solver::viterbi;
 use viterbi_solver::lagrangian::Lagrangian;
@@ -62,8 +63,8 @@ fn lagrangian(hmm: HMM, sequences: Vec<Array1<usize>>, constraints: Constraints)
 
 fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, prop_consistency_cstr: f64) -> Array1<Array1<usize>> {
     let mut model = GlobalOpti::new(hmm, sequences, constraints);
-    model.build_model(prop_consistency_cstr);
-    model.solve();
+    model.build_model();
+    model.solve(prop_consistency_cstr);
     let predictions = model.get_solutions();
     predictions
 }
@@ -84,19 +85,19 @@ fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>
 }
 
 fn main() {
-
+    //lp_exp::launch_exp();
     let mut args = Cli::from_args();
 
     println!("Loading matrices");
+    args.hmm_path.push("b");
+    let emissionprob = utils::read_matrix(&args.hmm_path, args.nstates, args.nobs).map(log);
     args.hmm_path.set_file_name("A");
     let transmat = utils::read_matrix(&args.hmm_path, args.nstates, args.nstates).map(log);
-    args.hmm_path.set_file_name("b");
-    let emissionprob = utils::read_matrix(&args.hmm_path, args.nstates, args.nobs).map(log);
     args.hmm_path.set_file_name("pi");
     let pi = utils::read_matrix(&args.hmm_path, 1, args.nstates).row(0).map(log);
     let hmm = HMM::new(transmat, emissionprob, pi);
     println!("Loading sequences");
-    args.input_path.set_file_name("sentences");
+    args.input_path.push("sentences");
     let sequences = utils::load_sequences(&args.input_path);
     args.input_path.set_file_name("tags");
     let tags = utils::load_sequences(&args.input_path);

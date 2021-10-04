@@ -7,11 +7,11 @@ nltk.download(["masc_tagged", "brown", "treebank", "mac_morpho"])
 
 def dump_matrix(filename, matrix):
     with open(filename, 'w') as fout:
-        fout.write('\n'.join([' '.join([str(x) for x in row]) for row in matrix]))
+        fout.write('\n'.join([','.join(["{:.5f}".format(x) for x in row]) for row in matrix]))
 
 def dump_vector(filename, vector):
     with open(filename, 'w') as fout:
-        fout.write(' '.join([str(x) for x in vector]))
+        fout.write(','.join(["{:.5f}".format(x) for x in vector]))
 
 def process_corpus(corpus, name):
     sentences = [x for x in corpus.tagged_sents()]
@@ -40,11 +40,14 @@ def process_corpus(corpus, name):
     b = [[0 for _ in range(next_wid)] for _ in range(next_pid)]
     seen_states = [0 for _ in range(next_pid)]
 
+    consistency_constraints = [set() for _ in range(next_pid)]
+
     print('computing HMM structure')
-    for sentence in sentences:
+    for sid, sentence in enumerate(sentences):
         pi[sentence[0][1]] += 1
         for i in range(len(sentence)):
             (word_i, pos_i) = sentence[i]
+            consistency_constraints[pos_i].add((sid, i))
             if i < len(sentence) - 1:
                 (_, pos_j) = sentence[i+1]
                 A[pos_i][pos_j] += 1
@@ -74,6 +77,10 @@ def process_corpus(corpus, name):
         ftags.write(' '.join([str(y) for _, y in sentence]) + '\n')
     fsent.close()
     ftags.close()
+
+    print("Dumping consistency constraints")
+    with open(os.path.join(name, "constraints"), "w") as f:
+        f.write('\n\n'.join([ '\n'.join([f'{seq_id} {t}' for seq_id, t in component]) for component in consistency_constraints]))
     print('Dumping maps')
     with open(os.path.join(name, 'map_word.pkl'), 'wb') as f:
         pickle.dump(map_word_int_r, f)

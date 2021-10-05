@@ -1,7 +1,8 @@
 use ndarray::Array1;
+use clap::{Arg, App};
 
 use std::time::Instant;
-use std::env;
+use std::path;
 
 mod utils;
 mod viterbi_solver;
@@ -13,26 +14,6 @@ use viterbi_solver::hmm::HMM;
 use viterbi_solver::constraints::Constraints;
 use viterbi_solver::opti::GlobalOpti;
 
-use structopt::StructOpt;
-
-#[derive(StructOpt)]
-struct Cli {
-    method: String,
-    hmm_path: std::path::PathBuf,
-    input_path: std::path::PathBuf,
-    nstates: usize,
-    nobs: usize,
-    prop_consistency_cstr: f64
-}
-
-
-fn log(n: &f64) -> f64 {
-    if *n == 0.0 {
-        return f64::NEG_INFINITY;
-    } else {
-        return n.log(10.0);
-    }
-}
 
 fn viterbi(hmm: HMM, sequences: &Array1<Array1<usize>>) -> Array1<Array1<usize>> {
     let mut max_seq_size = 0;
@@ -69,6 +50,33 @@ fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Const
     predictions
 }
 
+fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>, output_path: &mut path::PathBuf) {
+    let props = Array1::range(0.0, 1.0, 0.05);
+    let mut model = GlobalOpti::new(hmm, sequences, constraints);
+    model.build_model();
+    let mut error_rates: Array1<f64> = Array1::zeros(props.len());
+    let mut runtime: Array1<f64> = Array1::zeros(props.len());
+    let nb_repeat = 10;
+    for i in 0..props.len() {
+        let prop = props[i];
+        let mut sum_errors = 0.0;
+        let mut sum_time = 0;
+        let nb_repeat = 10;
+        for _ in 0..nb_repeat {
+            let time = model.solve(prop);
+            sum_time += time;
+            let predictions = model.get_solutions();
+            let error_rate = error_rate(&predictions, tags);
+            sum_errors += error_rate;
+        }
+        error_rates[i] = sum_errors / (nb_repeat as f64);
+        runtime[i] = (sum_time as f64) / (nb_repeat as f64);
+    }
+
+    output_path.set_file_name("metrics");
+    utils::write_metrics(&props, &error_rates, &runtime, &output_path);
+}
+
 fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>) -> f64 {
     let mut errors = 0.0;
     let mut total = 0.0;
@@ -85,38 +93,35 @@ fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>
 }
 
 fn main() {
-    //lp_exp::launch_exp();
-    let mut args = Cli::from_args();
+    lp_exp::launch_exp();
+    /*
 
-    println!("Loading matrices");
-    args.hmm_path.push("b");
-    let emissionprob = utils::read_matrix(&args.hmm_path, args.nstates, args.nobs).map(log);
-    args.hmm_path.set_file_name("A");
-    let transmat = utils::read_matrix(&args.hmm_path, args.nstates, args.nstates).map(log);
-    args.hmm_path.set_file_name("pi");
-    let pi = utils::read_matrix(&args.hmm_path, 1, args.nstates).row(0).map(log);
-    let hmm = HMM::new(transmat, emissionprob, pi);
-    println!("Loading sequences");
-    args.input_path.push("sentences");
-    let sequences = utils::load_sequences(&args.input_path);
-    args.input_path.set_file_name("tags");
-    let tags = utils::load_sequences(&args.input_path);
+    let matches = App::new("Consistent viterbi")
+        .version("0.1")
+        .author("Alexandre Dubray <alexandre.dubray@uclouvain.be")
+        .about("Multiple viterbi with consistency constraints")
+        .arg(Arg::new("config")
+            .short('c')
+            .long("config")
+            .value_name("FILE")
+            .about("configuration file")
+            .takes_value(true)
+            .required(true))
+        .get_matches();
 
-    println!("Loading constraints");
-    args.input_path.set_file_name("constraints");
-    let constraints = Constraints::from_file(&args.input_path);
-    
-    let predictions = {
-        if args.method == "viterbi" {
-            viterbi(hmm, &sequences)
-        } else if args.method == "global_opti" {
-            global_opti(&hmm, &sequences, &constraints, args.prop_consistency_cstr)
-        } else {
-            panic!("Unknown solving method: {}", args.method)
-        }
+    let mut config = if let Some(f) = matches.value_of("config") {
+        utils::Config::from_config_file(std::path::PathBuf::from(f))
+    } else {
+        panic!("No config file provided")
     };
-    let e = error_rate(&predictions, &tags);
-    println!("Error rate {}", e);
-    args.hmm_path.set_file_name(args.method + "_output");
-    utils::write_outputs(&args.hmm_path, &predictions);
+
+    let a = config.get_transmatrix();
+    let b = config.get_emissionmatrix();
+    let pi = config.get_initprob();
+    let hmm = HMM::new(a, b, pi);
+
+    let sequences = config.get_sequences();
+    let tags = config.get_tags();
+    let constraints = config.get_constraints();
+    */
 }

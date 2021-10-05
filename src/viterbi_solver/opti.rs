@@ -2,6 +2,7 @@ use gurobi::*;
 use ndarray::Array1;
 use std::collections::HashMap;
 use rand::Rng;
+use std::time::Instant;
 
 use super::hmm::HMM;
 use super::constraints::Constraints;
@@ -144,7 +145,7 @@ impl<'b> GlobalOpti<'b> {
         self.model.set_objective(objective, Maximize).unwrap();
     }
 
-    pub fn solve(&mut self, prop_consistency_cstr: f64) {
+    pub fn solve(&mut self, prop_consistency_cstr: f64) -> u64 {
         let mut rng = rand::thread_rng();
         for cstr in &mut self.consistency_cstr {
             cstr.remove();
@@ -184,10 +185,12 @@ impl<'b> GlobalOpti<'b> {
                 }
             }
         }
+        let start = Instant::now();
         match self.model.optimize() {
             Ok(_) => (),
             Err(error) => panic!("Could not solve the model: {:?}", error)
         };
+        start.elapsed().as_secs()
     }
 
     fn get_solution(&self, seq_id: usize) -> Array1<usize> {

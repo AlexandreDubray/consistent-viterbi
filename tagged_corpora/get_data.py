@@ -5,6 +5,8 @@ import nltk
 
 nltk.download(["masc_tagged", "brown", "treebank", "mac_morpho"])
 
+script_dir = os.path.dirname(os.path.realpath(__file__))
+
 def dump_matrix(filename, matrix):
     with open(filename, 'w') as fout:
         fout.write('\n'.join([','.join(["{:.5f}".format(x) for x in row]) for row in matrix]))
@@ -60,18 +62,18 @@ def process_corpus(corpus, name):
     b = [[x/seen_states[i] for x in row] for i, row in enumerate(b)]
 
     try:
-        os.mkdir(name)
+        os.mkdir(os.path.join(script_dir, name))
     except FileExistsError:
         pass
 
     print('Dumping HMM structure...')
-    dump_matrix(os.path.join(name, 'A'), A)
-    dump_matrix(os.path.join(name, 'b'), b)
-    dump_vector(os.path.join(name, 'pi'), pi)
+    dump_matrix(os.path.join(script_dir, name, 'A'), A)
+    dump_matrix(os.path.join(script_dir, name, 'b'), b)
+    dump_vector(os.path.join(script_dir, name, 'pi'), pi)
 
     print('Dumping sentences and tags')
-    fsent = open(os.path.join(name, 'sentences'), 'w')
-    ftags = open(os.path.join(name, 'tags'), 'w')
+    fsent = open(os.path.join(script_dir, name, 'sentences'), 'w')
+    ftags = open(os.path.join(script_dir, name, 'tags'), 'w')
     for sentence in sentences:
         fsent.write(' '.join([str(x) for x, _ in sentence]) + '\n')
         ftags.write(' '.join([str(y) for _, y in sentence]) + '\n')
@@ -79,13 +81,23 @@ def process_corpus(corpus, name):
     ftags.close()
 
     print("Dumping consistency constraints")
-    with open(os.path.join(name, "constraints"), "w") as f:
+    with open(os.path.join(script_dir, name, "constraints"), "w") as f:
         f.write('\n\n'.join([ '\n'.join([f'{seq_id} {t}' for seq_id, t in component]) for component in consistency_constraints]))
     print('Dumping maps')
-    with open(os.path.join(name, 'map_word.pkl'), 'wb') as f:
+    with open(os.path.join(script_dir, name, 'map_word.pkl'), 'wb') as f:
         pickle.dump(map_word_int_r, f)
-    with open(os.path.join(name, 'map_pos.pkl'), 'wb') as f:
+    with open(os.path.join(script_dir, name, 'map_pos.pkl'), 'wb') as f:
         pickle.dump(map_pos_int_r, f)
+
+    print("Generating configs")
+    for method in ['viterbi', 'global_opti']:
+        with open(os.path.join(script_dir, name, f'config_{method}'), 'w') as f:
+            f.write(f'method={method}\n')
+            f.write(f'hmm_path={os.path.join(script_dir, name)}\n')
+            f.write(f'input_path={os.path.join(script_dir, name)}\n')
+            f.write(f'nstates={len(A)}\n')
+            f.write(f'nobs={len(b[0])}\n')
+
 
 print('masc...')
 process_corpus(masc_tagged, 'masc')

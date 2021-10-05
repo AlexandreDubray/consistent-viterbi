@@ -72,7 +72,7 @@ def process_corpus(corpus, name):
     dump_vector(os.path.join(script_dir, name, 'pi'), pi)
 
     print('Dumping sentences and tags')
-    fsent = open(os.path.join(script_dir, name, 'sentences'), 'w')
+    fsent = open(os.path.join(script_dir, name, 'sequences'), 'w')
     ftags = open(os.path.join(script_dir, name, 'tags'), 'w')
     for sentence in sentences:
         fsent.write(' '.join([str(x) for x, _ in sentence]) + '\n')

@@ -6,7 +6,6 @@ use std::path;
 
 mod utils;
 mod viterbi_solver;
-mod lp_exp;
 
 use viterbi_solver::viterbi;
 use viterbi_solver::lagrangian::Lagrangian;
@@ -50,7 +49,7 @@ fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Const
     predictions
 }
 
-fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>, output_path: &mut path::PathBuf) {
+fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>, output_path: &path::PathBuf) {
     let props = Array1::range(0.0, 1.0, 0.05);
     let mut model = GlobalOpti::new(hmm, sequences, constraints);
     model.build_model();
@@ -59,6 +58,7 @@ fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &C
     let nb_repeat = 10;
     for i in 0..props.len() {
         let prop = props[i];
+        println!("{}", prop);
         let mut sum_errors = 0.0;
         let mut sum_time = 0;
         let nb_repeat = 10;
@@ -73,7 +73,6 @@ fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &C
         runtime[i] = (sum_time as f64) / (nb_repeat as f64);
     }
 
-    output_path.set_file_name("metrics");
     utils::write_metrics(&props, &error_rates, &runtime, &output_path);
 }
 
@@ -93,9 +92,6 @@ fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>
 }
 
 fn main() {
-    lp_exp::launch_exp();
-    /*
-
     let matches = App::new("Consistent viterbi")
         .version("0.1")
         .author("Alexandre Dubray <alexandre.dubray@uclouvain.be")
@@ -123,5 +119,10 @@ fn main() {
     let sequences = config.get_sequences();
     let tags = config.get_tags();
     let constraints = config.get_constraints();
-    */
+
+    let output_path = config.output_path();
+    if config.is_global_opti() {
+        global_opti_exp(&hmm, &sequences, &constraints, &tags, output_path);
+    } else if config.is_viterbi() {
+    }
 }

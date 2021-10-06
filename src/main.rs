@@ -2,7 +2,8 @@ use ndarray::Array1;
 use clap::{Arg, App};
 
 use std::time::Instant;
-use std::path;
+use std::fs::File;
+use std::io::Write;
 
 mod utils;
 mod viterbi_solver;
@@ -43,37 +44,25 @@ fn lagrangian(hmm: HMM, sequences: Vec<Array1<usize>>, constraints: Constraints)
 
 fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, prop_consistency_cstr: f64) -> Array1<Array1<usize>> {
     let mut model = GlobalOpti::new(hmm, sequences, constraints);
-    model.build_model();
-    model.solve(prop_consistency_cstr);
+    model.build_model(prop_consistency_cstr);
+    model.solve();
     let predictions = model.get_solutions();
     predictions
 }
 
-fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>, output_path: &path::PathBuf) {
-    let props = Array1::range(0.0, 1.0, 0.05);
-    let mut model = GlobalOpti::new(hmm, sequences, constraints);
-    model.build_model();
-    let mut error_rates: Array1<f64> = Array1::zeros(props.len());
-    let mut runtime: Array1<f64> = Array1::zeros(props.len());
+fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>, config: &utils::Config) {
     let nb_repeat = 10;
-    for i in 0..props.len() {
-        let prop = props[i];
-        println!("{}", prop);
-        let mut sum_errors = 0.0;
-        let mut sum_time = 0;
-        let nb_repeat = 10;
-        for _ in 0..nb_repeat {
-            let time = model.solve(prop);
-            sum_time += time;
-            let predictions = model.get_solutions();
-            let error_rate = error_rate(&predictions, tags);
-            sum_errors += error_rate;
-        }
-        error_rates[i] = sum_errors / (nb_repeat as f64);
-        runtime[i] = (sum_time as f64) / (nb_repeat as f64);
+    let mut output = File::create(config.output_path()).unwrap();
+    for i in 0..nb_repeat {
+        println!("config {:.2} {}/{}", config.get_prop(), i+1, nb_repeat);
+        let mut model = GlobalOpti::new(hmm, sequences, constraints);
+        model.build_model(config.get_prop());
+        let runtime = model.solve();
+        let predictions = model.get_solutions();
+        let error_rate = error_rate(&predictions, tags);
+        let s = format!("{:.4} {}\n", error_rate, runtime);
+        output.write(s.as_bytes()).unwrap();
     }
-
-    utils::write_metrics(&props, &error_rates, &runtime, &output_path);
 }
 
 fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>) -> f64 {
@@ -120,9 +109,8 @@ fn main() {
     let tags = config.get_tags();
     let constraints = config.get_constraints();
 
-    let output_path = config.output_path();
     if config.is_global_opti() {
-        global_opti_exp(&hmm, &sequences, &constraints, &tags, output_path);
+        global_opti_exp(&hmm, &sequences, &constraints, &tags, &config);
     } else if config.is_viterbi() {
     }
 }

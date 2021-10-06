@@ -16,8 +16,6 @@ pub struct GlobalOpti<'a> {
     constraints: &'a Constraints,
     model: Model,
     vars: Array1<HashMap<Arc, Var>>,
-    consistency_cstr: Vec<Constr>,
-    inflow_map: HashMap<(usize, usize, usize), LinExpr>
 }
 
 impl<'b> GlobalOpti<'b> {
@@ -26,9 +24,7 @@ impl<'b> GlobalOpti<'b> {
         let env = Env::new("logfile.log").unwrap();
         let model = Model::new("model", &env).unwrap();
         let vars = sequences.map(|_| -> HashMap<Arc, Var> { HashMap::new() });
-        let consistency_cstr: Vec<Constr> = Vec::new();
-        let inflow_map: HashMap<(usize, usize, usize), LinExpr> = HashMap::new();
-        Self {hmm, sequences, constraints, model, vars, consistency_cstr, inflow_map}
+        Self {hmm, sequences, constraints, model, vars}
     }
 
     fn get_in_out_flow(&self, vars: &HashMap<Arc, Var>, state: usize, time: usize) -> LinExpr {
@@ -48,16 +44,10 @@ impl<'b> GlobalOpti<'b> {
         in_out_flow
     }
 
-    pub fn build_model(&mut self) {
-
-        println!("Creating the global optimisation problem");
-
-        println!("Adding the variables in the model");
+    pub fn build_model(&mut self, prop_consistency_cstr: f64) {
         let mut objective = LinExpr::new();
+        let mut inflow_map: HashMap<(usize, usize, usize), LinExpr> = HashMap::new();
         for i in 0..self.sequences.len() {
-            if i % 1000 == 0 {
-                println!("{}/{}", i, self.sequences.len());
-            }
             let sequence = &self.sequences[i];
             let mut source_flow = LinExpr::new();
             let mut target_flow = LinExpr::new();
@@ -74,7 +64,7 @@ impl<'b> GlobalOpti<'b> {
                             objective = objective.add_term(proba, x.clone());
                             let mut inflow = LinExpr::new();
                             inflow = inflow.add_term(1.0, x.clone());
-                            self.inflow_map.insert((i, state, t), inflow);
+                            inflow_map.insert((i, state, t), inflow);
                             self.vars[i].insert(arc, x);
                         }
                     }
@@ -102,7 +92,7 @@ impl<'b> GlobalOpti<'b> {
                                     self.vars[i].insert(arc, x);
                                 }
                             }
-                            self.inflow_map.insert((i, state, t), inflow);
+                            inflow_map.insert((i, state, t), inflow);
                         }
                     }
                 }
@@ -117,7 +107,6 @@ impl<'b> GlobalOpti<'b> {
             };
         }
 
-        println!("Adding the shortest path constraints");
 
         for i in 0..self.sequences.len() {
             let sequence = &self.sequences[i];
@@ -132,26 +121,9 @@ impl<'b> GlobalOpti<'b> {
                     }
                 }
             }
-            if i % 1000 == 0 {
-                println!("{}/{}", i, self.sequences.len());
-            }
         }
 
-        println!("updating model");
-        match self.model.update() {
-            Ok(_) => (),
-            Err(error) => panic!("Can not update the model: {:?}", error)
-        };
-        self.model.set_objective(objective, Maximize).unwrap();
-    }
-
-    pub fn solve(&mut self, prop_consistency_cstr: f64) -> u64 {
         let mut rng = rand::thread_rng();
-        for cstr in &mut self.consistency_cstr {
-            cstr.remove();
-        }
-        self.consistency_cstr.clear();
-        println!("Adding the consistency constraints");
         for component in &self.constraints.components {
             for i in 0..component.len()-1 {
                 let x: f64 = rng.gen();
@@ -160,14 +132,14 @@ impl<'b> GlobalOpti<'b> {
                     let (s2, t2) = component[i+1];
                     for state in 0..self.hmm.nstates() {
                         let mut found = false;
-                        let inflow_s1 = match self.inflow_map.get(&(s1, state, t1)) {
+                        let inflow_s1 = match inflow_map.get(&(s1, state, t1)) {
                             Some(f) => {
                                 found = true;
                                 f.clone()
                             },
                             None => LinExpr::new()
                         };
-                        let inflow_s2 = match self.inflow_map.get(&(s2, state, t2)) {
+                        let inflow_s2 = match inflow_map.get(&(s2, state, t2)) {
                             Some(f) => {
                                 found = true;
                                 f.clone()
@@ -177,7 +149,7 @@ impl<'b> GlobalOpti<'b> {
                         if found {
                             let diff_flow = inflow_s1 - inflow_s2;
                             match self.model.add_constr("", diff_flow, Equal, 0.0) {
-                                Ok(cstr) => self.consistency_cstr.push(cstr),
+                                Ok(_) => (),
                                 Err(error) => panic!("Cannot add constraint to the model: {:?}", error)
                             };
                         }
@@ -185,6 +157,15 @@ impl<'b> GlobalOpti<'b> {
                 }
             }
         }
+
+        match self.model.update() {
+            Ok(_) => (),
+            Err(error) => panic!("Can not update the model: {:?}", error)
+        };
+        self.model.set_objective(objective, Maximize).unwrap();
+    }
+
+    pub fn solve(&mut self) -> u64 {
         let start = Instant::now();
         match self.model.optimize() {
             Ok(_) => (),

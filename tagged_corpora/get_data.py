@@ -7,6 +7,12 @@ nltk.download(["masc_tagged", "brown", "treebank", "mac_morpho"])
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
 
+def safe_mkdir(path):
+    try:
+        os.mkdir(path)
+    except FileExistsError:
+        pass
+
 def dump_matrix(filename, matrix):
     with open(filename, 'w') as fout:
         fout.write('\n'.join([','.join(["{:.5f}".format(x) for x in row]) for row in matrix]))
@@ -61,10 +67,7 @@ def process_corpus(corpus, name):
     A = [[x/seen_states[i] for x in row] for i, row in enumerate(A)]
     b = [[x/seen_states[i] for x in row] for i, row in enumerate(b)]
 
-    try:
-        os.mkdir(os.path.join(script_dir, name))
-    except FileExistsError:
-        pass
+    safe_mkdir(os.path.join(script_dir, name))
 
     print('Dumping HMM structure...')
     dump_matrix(os.path.join(script_dir, name, 'A'), A)
@@ -90,13 +93,21 @@ def process_corpus(corpus, name):
         pickle.dump(map_pos_int_r, f)
 
     print("Generating configs")
+    safe_mkdir(os.path.join(script_dir, name, 'configs'))
+
     for method in ['viterbi', 'global_opti']:
-        with open(os.path.join(script_dir, name, f'config_{method}'), 'w') as f:
-            f.write(f'method={method}\n')
-            f.write(f'hmm_path={os.path.join(script_dir, name)}\n')
-            f.write(f'input_path={os.path.join(script_dir, name)}\n')
-            f.write(f'nstates={len(A)}\n')
-            f.write(f'nobs={len(b[0])}\n')
+        output_path = os.path.join(script_dir, name, 'output_{method}')
+        safe_mkdir(output_path)
+        for prop_int in range(0, 101, 5):
+            prop = round(prop_int / 100, 2)
+            with open(os.path.join(script_dir, name, 'configs', f'config_{method}'), 'w') as f:
+                f.write(f'method={method}\n')
+                f.write(f'hmm_path={os.path.join(script_dir, name)}\n')
+                f.write(f'input_path={os.path.join(script_dir, name)}\n')
+                f.write(f'output_path={output_path}')
+                f.write(f'nstates={len(A)}\n')
+                f.write(f'nobs={len(b[0])}\n')
+                f.write(f'prop={prop}\n')
 
 
 print('masc...')

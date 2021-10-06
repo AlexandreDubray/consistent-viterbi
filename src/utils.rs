@@ -69,6 +69,7 @@ pub struct Config {
     output_path: PathBuf,
     nstates: usize,
     nobs: usize,
+    prop_constraints: f64
 }
 
 impl Config {
@@ -80,8 +81,9 @@ impl Config {
         let output_path = PathBuf::from(".");
         let nstates = 0;
         let nobs = 0;
+        let prop_constraints = 0.0;
 
-        Self {method, hmm_path, input_path, output_path, nstates, nobs}
+        Self {method, hmm_path, input_path, output_path, nstates, nobs, prop_constraints}
     }
 
     pub fn from_config_file(filename: PathBuf) -> Self {
@@ -103,18 +105,17 @@ impl Config {
             match option {
                 "method" => instance.method = value,
                 "hmm_path" => instance.hmm_path = PathBuf::from(value),
-                "input_path" => {
-                    instance.input_path = PathBuf::from(value.clone());
-                    instance.output_path = PathBuf::from(value);
-                    instance.output_path.push("metrics");
-                },
+                "input_path" => instance.input_path = PathBuf::from(value),
+                "output_path" => instance.output_path = PathBuf::from(value),
                 "nstates" => instance.nstates = value.parse().unwrap(),
                 "nobs" => instance.nobs = value.parse().unwrap(),
+                "prop" => instance.prop_constraints = value.parse().unwrap(),
                 _ => panic!("Unknown option in config file: {:?}", option)
             };
         }
         instance.hmm_path.push("tmp");
         instance.input_path.push("tmp");
+        instance.output_path.push(format!("{:.2}", instance.prop_constraints));
         instance
     }
 
@@ -158,6 +159,10 @@ impl Config {
 
     pub fn output_path(&self) -> &PathBuf {
         &self.output_path
+    }
+
+    pub fn get_prop(&self) -> f64 {
+        self.prop_constraints
     }
 }
 

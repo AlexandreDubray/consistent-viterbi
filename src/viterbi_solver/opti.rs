@@ -21,7 +21,8 @@ pub struct GlobalOpti<'a> {
 impl<'b> GlobalOpti<'b> {
 
     pub fn new(hmm: &'b HMM, sequences: &'b Array1<Array1<usize>>, constraints: &'b Constraints) -> Self {
-        let env = Env::new("logfile.log").unwrap();
+        let mut env = Env::new("logfile.log").unwrap();
+        env.set(param::OutputFlag, 0).unwrap();
         let model = Model::new("model", &env).unwrap();
         let vars = sequences.map(|_| -> HashMap<Arc, Var> { HashMap::new() });
         Self {hmm, sequences, constraints, model, vars}

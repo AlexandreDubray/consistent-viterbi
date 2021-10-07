@@ -96,15 +96,17 @@ def process_corpus(corpus, name):
     safe_mkdir(os.path.join(script_dir, name, 'configs'))
 
     for method in ['viterbi', 'global_opti']:
-        output_path = os.path.join(script_dir, name, 'output_{method}')
+        output_path = os.path.join(script_dir, name, f'output_{method}')
+        config_path = os.path.join(script_dir, name, f'configs_{method}')
         safe_mkdir(output_path)
+        safe_mkdir(config_path)
         for prop_int in range(0, 101, 5):
             prop = round(prop_int / 100, 2)
-            with open(os.path.join(script_dir, name, 'configs', f'config_{method}'), 'w') as f:
+            with open(os.path.join(config_path, f'config_{prop}'), 'w') as f:
                 f.write(f'method={method}\n')
                 f.write(f'hmm_path={os.path.join(script_dir, name)}\n')
                 f.write(f'input_path={os.path.join(script_dir, name)}\n')
-                f.write(f'output_path={output_path}')
+                f.write(f'output_path={output_path}\n')
                 f.write(f'nstates={len(A)}\n')
                 f.write(f'nobs={len(b[0])}\n')
                 f.write(f'prop={prop}\n')

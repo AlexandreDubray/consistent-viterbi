@@ -5,34 +5,32 @@ pub struct HMM {
     a: Array2<f64>,
     b: Array2<f64>,
     pi: Array1<f64>,
-    flat_a: Array1<f64>
 }
 
 impl HMM {
 
     pub fn new(a: Array2<f64>, b: Array2<f64>, pi: Array1<f64>) -> Self {
         //TODO: checks
-        let flat_a = Array1::from_iter(a.iter().cloned());
-        Self{ a, b, pi, flat_a}
+        Self{ a, b, pi}
     }
 
     pub fn nstates(&self) -> usize {
         self.a.nrows()
     }
 
-    pub fn nobs(&self) -> usize {
-        self.b.ncols()
+    pub fn init_prob(&self, state: usize) -> f64 {
+        self.pi[state]
     }
 
-    pub fn init_prob(&self, obs: usize) -> Array1<f64> {
+    pub fn init_prob_obs(&self, obs: usize) -> Array1<f64> {
         self.pi.clone() + self.b.slice(s![.., obs])
     }
 
-    pub fn single_init_prob(&self, state: usize, obs: usize) -> f64 {
-        self.pi[state] + self.b[[state, obs]]
+    pub fn transitions_from(&self, state_from: usize) -> ArrayView1<f64> {
+        self.a.slice(s![state_from, ..])
     }
 
-    pub fn transition(&self, state_to: usize) -> ArrayView1<f64> {
+    pub fn transitions_to(&self, state_to: usize) -> ArrayView1<f64> {
         self.a.slice(s![.., state_to])
     }
 

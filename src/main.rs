@@ -9,7 +9,6 @@ mod utils;
 mod viterbi_solver;
 
 use viterbi_solver::viterbi;
-use viterbi_solver::lagrangian::Lagrangian;
 use viterbi_solver::hmm::HMM;
 use viterbi_solver::constraints::Constraints;
 use viterbi_solver::opti::GlobalOpti;
@@ -30,36 +29,25 @@ fn viterbi(hmm: HMM, sequences: &Array1<Array1<usize>>) -> Array1<Array1<usize>>
     predictions
 }
 
-fn lagrangian(hmm: HMM, sequences: Vec<Array1<usize>>, constraints: Constraints) {
-    let mut max_seq_size = 0;
-    for sequence in &sequences {
-        max_seq_size = max_seq_size.max(sequence.len());
-    }
-
-    println!("Creating lagrangian");
-    let mut lagrangian = Lagrangian::new(hmm, sequences, max_seq_size, constraints);
-    println!("Solving lagrangian");
-    lagrangian.solve();
-}
-
-fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, prop_consistency_cstr: f64) -> Array1<Array1<usize>> {
+fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, prop_consistency_cstr: f64, tags: &Array1<Array1<usize>>) {
     let mut model = GlobalOpti::new(hmm, sequences, constraints);
-    model.build_model(prop_consistency_cstr);
-    model.solve();
-    let predictions = model.get_solutions();
-    predictions
+    model.build_model();
+    let time = model.solve(prop_consistency_cstr);
+    let solutions = model.get_solutions();
+    let error_rate = error_rate(solutions, tags);
+    println!("Error rate {:.2} in {} sec", error_rate, time);
 }
 
 fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>, config: &utils::Config) {
     let nb_repeat = 10;
     let mut output = File::create(config.output_path()).unwrap();
+    let mut model = GlobalOpti::new(hmm, sequences, constraints);
+    model.build_model();
     for i in 0..nb_repeat {
         println!("config {:.2} {}/{}", config.get_prop(), i+1, nb_repeat);
-        let mut model = GlobalOpti::new(hmm, sequences, constraints);
-        model.build_model(config.get_prop());
-        let runtime = model.solve();
+        let runtime = model.solve(config.get_prop());
         let predictions = model.get_solutions();
-        let error_rate = error_rate(&predictions, tags);
+        let error_rate = error_rate(predictions, tags);
         let s = format!("{:.4} {}\n", error_rate, runtime);
         output.write(s.as_bytes()).unwrap();
     }
@@ -110,7 +98,8 @@ fn main() {
     let constraints = config.get_constraints();
 
     if config.is_global_opti() {
-        global_opti_exp(&hmm, &sequences, &constraints, &tags, &config);
+        //global_opti_exp(&hmm, &sequences, &constraints, &tags, &config);
+        global_opti(&hmm, &sequences, &constraints, config.get_prop(), &tags);
     } else if config.is_viterbi() {
     }
 }

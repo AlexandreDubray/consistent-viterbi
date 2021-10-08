@@ -4,8 +4,8 @@ import subprocess
 
 from multiprocessing import Pool
 
-config_path = sys.argv[0]
-nthreads = int(sys.argv[1])
+config_path = sys.argv[1]
+nthreads = int(sys.argv[2])
 
 config_files = [os.path.join(config_path, f) for f in os.listdir(config_path) if os.path.isfile(os.path.join(config_path, f))]
 

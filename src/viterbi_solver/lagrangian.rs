@@ -76,8 +76,8 @@ impl Lagrangian {
         let sequence = &self.sequences[seq_id];
         let must_visit = &self.must_visit_constraints[seq_id];
         match must_visit.get(&0) {
-            Some(x) => self.viterbi_array[[0, *x]] = self.hmm.single_init_prob(*x, sequence[0]),
-            None => self.viterbi_array.row_mut(0).assign(&self.hmm.init_prob(sequence[0]))
+            Some(x) => self.viterbi_array[[0, *x]] = self.hmm.init_prob(*x) + self.hmm.emit_prob(*x, sequence[0]),
+            None => self.viterbi_array.row_mut(0).assign(&self.hmm.init_prob_obs(sequence[0]))
         };
 
         for t in 1..sequence.len() {
@@ -85,7 +85,7 @@ impl Lagrangian {
                 let emit_prob = self.hmm.emit_prob(state_to, sequence[t]);
                 if emit_prob > f64::NEG_INFINITY {
                     let previous_prob = self.viterbi_array.row(t-1);
-                    let transitions = self.hmm.transition(state_to);
+                    let transitions = self.hmm.transitions_to(state_to);
                     let probs = &previous_prob + &transitions;
                     let state_from = probs.argmax().unwrap();
                     self.viterbi_array[[t, state_to]] = probs[state_from] + emit_prob;

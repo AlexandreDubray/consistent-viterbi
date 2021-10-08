@@ -32,7 +32,7 @@ impl<'b> Viterbi<'b> {
     fn update_state_from(&mut self, state: usize, t: usize, emit_prob: f64) {
         if emit_prob > f64::NEG_INFINITY {
             let previous_prob = self.viterbi_array.row(t-1);
-            let transitions = self.hmm.transition(state);
+            let transitions = self.hmm.transitions_to(state);
             let probs = &previous_prob + &transitions;
             let state_from = probs.argmax().unwrap();
             self.viterbi_array[[t, state]] = probs[state_from] + emit_prob;
@@ -44,7 +44,7 @@ impl<'b> Viterbi<'b> {
 
     pub fn solve(&mut self, sequence: &Array1<usize>) -> Array1<usize> {
         // Reset the log probs
-        self.viterbi_array.row_mut(0).assign(&self.hmm.init_prob(sequence[0]));
+        self.viterbi_array.row_mut(0).assign(&self.hmm.init_prob_obs(sequence[0]));
 
         for t in 1..sequence.len() {
             for state_to in 0..self.hmm.nstates() {
@@ -56,7 +56,7 @@ impl<'b> Viterbi<'b> {
     }
 
     pub fn solve_must_visit(&mut self, sequence: &Array1<usize>, must_visit: &HashMap<usize, usize>) -> Array1<usize> {
-        self.viterbi_array.row_mut(0).assign(&self.hmm.init_prob(sequence[0]));
+        self.viterbi_array.row_mut(0).assign(&self.hmm.init_prob_obs(sequence[0]));
 
         for t in 1..sequence.len() {
             let range = match must_visit.get(&t) {

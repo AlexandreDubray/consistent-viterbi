@@ -4,13 +4,6 @@ use std::fs::File;
 use ndarray::Array1;
 use std::collections::HashSet;
 
-struct ConsistencyConstraint {
-    seq_id_from: usize,
-    seq_id_to: usize,
-    timestamp_from: usize,
-    timestamp_to: usize
-}
-
 pub struct Constraints {
     pub components: Array1<Vec<(usize, usize)>>,
     pub constrained_elements: HashSet<(usize, usize)>
@@ -55,9 +48,5 @@ impl Constraints {
             components.push(component);
         }
         Self { components: Array1::from_vec(components), constrained_elements}
-    }
-
-    pub fn get_component(&self, idx: usize) -> &Vec<(usize, usize)> {
-        &self.components[idx]
     }
 }

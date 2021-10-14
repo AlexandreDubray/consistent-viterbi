@@ -8,25 +8,23 @@ use std::io::Write;
 mod utils;
 mod viterbi_solver;
 
-use viterbi_solver::viterbi;
 use viterbi_solver::hmm::HMM;
 use viterbi_solver::constraints::Constraints;
 use viterbi_solver::opti::GlobalOpti;
 
 
-fn viterbi(hmm: HMM, sequences: &Array1<Array1<usize>>) -> Array1<Array1<usize>> {
+fn viterbi(hmm: &mut HMM, sequences: &Array1<Array1<usize>>, tags: &Array1<Array1<usize>>) {
     let mut max_seq_size = 0;
     for sequence in sequences {
         max_seq_size = max_seq_size.max(sequence.len());
     }
 
-    let mut viterbi = viterbi::Viterbi::new(&hmm, max_seq_size);
     let start = Instant::now();
     println!("Start of the predictions");
-    let predictions = sequences.map(|sequence| -> Array1<usize> { viterbi.solve(&sequence) });
+    let predictions = sequences.map(|sequence| -> Array1<usize> { hmm.decode(&sequence) });
     let elapsed = start.elapsed().as_secs();
-    println!("Viterbi solved in {} seconds", elapsed);
-    predictions
+    let error_rate = error_rate(&predictions, tags);
+    println!("Error rate {:.2} in {} sec", error_rate, elapsed);
 }
 
 fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, prop_consistency_cstr: f64, tags: &Array1<Array1<usize>>) {
@@ -71,7 +69,7 @@ fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>
 fn main() {
     let matches = App::new("Consistent viterbi")
         .version("0.1")
-        .author("Alexandre Dubray <alexandre.dubray@uclouvain.be")
+        .author("Alexandre Dubray <alexandre.dubray@uclouvain.be>")
         .about("Multiple viterbi with consistency constraints")
         .arg(Arg::new("config")
             .short('c')
@@ -80,6 +78,12 @@ fn main() {
             .about("configuration file")
             .takes_value(true)
             .required(true))
+        .arg(Arg::new("exp")
+            .short('e')
+            .long("exp")
+            .value_name("EXPERIENCES")
+            .about("launch experiences or not")
+            .takes_value(false))
         .get_matches();
 
     let mut config = if let Some(f) = matches.value_of("config") {
@@ -88,18 +92,20 @@ fn main() {
         panic!("No config file provided")
     };
 
-    let a = config.get_transmatrix();
-    let b = config.get_emissionmatrix();
-    let pi = config.get_initprob();
-    let hmm = HMM::new(a, b, pi);
+    let exp = matches.occurrences_of("exp") == 1;
 
     let sequences = config.get_sequences();
     let tags = config.get_tags();
+    let mut hmm = HMM::new(&sequences, &tags, config.nstates, config.nobs);
     let constraints = config.get_constraints();
 
     if config.is_global_opti() {
-        //global_opti_exp(&hmm, &sequences, &constraints, &tags, &config);
-        global_opti(&hmm, &sequences, &constraints, config.get_prop(), &tags);
+        if exp {
+            global_opti_exp(&hmm, &sequences, &constraints, &tags, &config);
+        } else {
+            global_opti(&hmm, &sequences, &constraints, config.get_prop(), &tags);
+        }
     } else if config.is_viterbi() {
+        viterbi(&mut hmm, &sequences, &tags);
     }
 }

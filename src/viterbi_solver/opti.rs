@@ -21,7 +21,7 @@ impl<'b> GlobalOpti<'b> {
 
     pub fn new(hmm: &'b HMM, sequences: &'b Array1<Array1<usize>>, constraints: &'b Constraints) -> Self {
         let mut env = Env::new("logfile.log").unwrap();
-        //env.set(param::OutputFlag, 0).unwrap();
+        env.set(param::OutputFlag, 0).unwrap();
         let model = Model::new("model", &env).unwrap();
         let consistency_constraints: Vec<Constr> = Vec::new();
         let inflow_map: HashMap<(usize, usize, usize), LinExpr> = HashMap::new();

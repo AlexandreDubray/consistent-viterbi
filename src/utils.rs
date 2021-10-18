@@ -101,6 +101,10 @@ impl Config {
         self.method == "viterbi"
     }
 
+    pub fn is_dp(&self) -> bool {
+        self.method == "dp"
+    }
+
     pub fn output_path(&self) -> &PathBuf {
         &self.output_path
     }

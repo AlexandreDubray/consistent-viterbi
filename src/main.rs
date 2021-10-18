@@ -11,6 +11,7 @@ mod viterbi_solver;
 use viterbi_solver::hmm::HMM;
 use viterbi_solver::constraints::Constraints;
 use viterbi_solver::opti::GlobalOpti;
+use viterbi_solver::dp::dp_solving;
 
 
 fn viterbi(hmm: &mut HMM, sequences: &Array1<Array1<usize>>, tags: &Array1<Array1<usize>>) {
@@ -49,6 +50,14 @@ fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &C
         let s = format!("{:.4} {}\n", error_rate, runtime);
         output.write(s.as_bytes()).unwrap();
     }
+}
+
+fn dp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>) {
+    let start = Instant::now();
+    let predictions = dp_solving(hmm, sequences, constraints);
+    let elapsed = start.elapsed().as_secs();
+    let error_rate = error_rate(&predictions, tags);
+    println!("Error rate {:.2} in {} secs", error_rate, elapsed);
 }
 
 fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>) -> f64 {
@@ -105,6 +114,8 @@ fn main() {
         } else {
             global_opti(&hmm, &sequences, &constraints, config.get_prop(), &tags);
         }
+    } else if config.is_dp() {
+        dp(&hmm, &sequences, &constraints, &tags);
     } else if config.is_viterbi() {
         viterbi(&mut hmm, &sequences, &tags);
     }

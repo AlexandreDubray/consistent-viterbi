@@ -50,7 +50,7 @@ impl<'b> GlobalOpti<'b> {
                         let mut outflow = LinExpr::new();
                         if t == 0 {
                             // Variable from source to state node
-                            let from_source_p = emit_prob + self.hmm.init_prob(state);
+                            let from_source_p = self.hmm.init_prob(state, sequence[0]);
                             if from_source_p > f64::NEG_INFINITY {
                                 let name = format!("{}-{}-{}-{}", i, 0, state, t);
                                 let from_source = self.add_var(from_source_p, name);

@@ -2,11 +2,12 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::fs::File;
 use ndarray::Array1;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 pub struct Constraints {
     pub components: Array1<Vec<(usize, usize)>>,
-    pub constrained_elements: HashSet<(usize, usize)>
+    pub constrained_elements: HashSet<(usize, usize)>,
+    map_elem_comp_id: HashMap<(usize, usize), usize>
 }
 
 impl Constraints {
@@ -47,6 +48,19 @@ impl Constraints {
         if component.len() > 1 {
             components.push(component);
         }
-        Self { components: Array1::from_vec(components), constrained_elements}
+        let mut map_elem_comp_id: HashMap<(usize, usize), usize> = HashMap::new();
+        for comp_id in 0..components.len() {
+            for elem in &components[comp_id] {
+                map_elem_comp_id.insert(*elem, comp_id);
+            }
+        }
+        Self { components: Array1::from_vec(components), constrained_elements, map_elem_comp_id}
+    }
+
+    pub fn get_comp_id(&self, seq_id: usize, time: usize) -> i32 {
+        match self.map_elem_comp_id.get(&(seq_id, time)) {
+            Some(x) => *x as i32,
+            None => -1
+        }
     }
 }

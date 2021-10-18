@@ -93,7 +93,7 @@ def process_corpus(corpus, name):
         pickle.dump(map_pos_int_r, f)
 
     print("Generating configs")
-    for method in ['viterbi', 'global_opti']:
+    for method in ['viterbi', 'global_opti', 'dp']:
         output_path = os.path.join(script_dir, name, f'output_{method}')
         config_path = os.path.join(script_dir, name, f'configs_{method}')
         safe_mkdir(output_path)

@@ -52,12 +52,27 @@ fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &C
     }
 }
 
-fn dp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>) {
+fn dp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>, prop_consistency_cstr: f64) {
     let start = Instant::now();
-    let predictions = dp_solving(hmm, sequences, constraints);
+    println!("Start predictions");
+    let predictions = dp_solving(hmm, sequences, constraints, prop_consistency_cstr);
     let elapsed = start.elapsed().as_secs();
     let error_rate = error_rate(&predictions, tags);
     println!("Error rate {:.2} in {} secs", error_rate, elapsed);
+}
+
+fn dp_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, tags: &Array1<Array1<usize>>, config: &utils::Config) {
+    let nb_repeat = 10;
+    let mut output = File::create(config.output_path()).unwrap();
+    for i in 0..nb_repeat {
+        println!("config {:.2} {}/{}", config.get_prop(), i+1, nb_repeat);
+        let start = Instant::now();
+        let predictions = dp_solving(hmm, sequences, constraints, config.get_prop());
+        let runtime = start.elapsed().as_secs();
+        let error_rate = error_rate(&predictions, tags);
+        let s = format!("{:.4} {}\n", error_rate, runtime);
+        output.write(s.as_bytes()).unwrap();
+    }
 }
 
 fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>) -> f64 {
@@ -115,7 +130,11 @@ fn main() {
             global_opti(&hmm, &sequences, &constraints, config.get_prop(), &tags);
         }
     } else if config.is_dp() {
-        dp(&hmm, &sequences, &constraints, &tags);
+        if exp {
+            dp_exp(&hmm, &sequences, &constraints, &tags, &config);
+        } else {
+            dp(&hmm, &sequences, &constraints, &tags, config.get_prop());
+        }
     } else if config.is_viterbi() {
         viterbi(&mut hmm, &sequences, &tags);
     }

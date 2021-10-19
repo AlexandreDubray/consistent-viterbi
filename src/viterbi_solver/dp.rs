@@ -1,5 +1,6 @@
 use ndarray::Array1;
 use std::collections::HashMap;
+use rand::Rng;
 
 use super::hmm::HMM;
 use super::constraints::Constraints;
@@ -25,7 +26,7 @@ impl DPEntry {
     }
 }
 
-pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints) -> Array1<Array1<usize>> {
+pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints, prop_cstr: f64) -> Array1<Array1<usize>> {
     let total_length = sequences.map(|x| -> usize { x.len() }).sum();
     let mut table: HashMap<(usize, usize), DPEntry> = HashMap::with_capacity(total_length*hmm.nstates());
     // initialize the DPEntry for the first layer of the first sequence
@@ -34,18 +35,21 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
     let mut dp_entry_source = DPEntry::new(0, 0);
     dp_entry_source.update(0.0, None, 0);
     table.insert((0, 0), dp_entry_source);
+
+    let mut rng = rand::thread_rng();
     
     let mut idx = 0;
     for seq_id in 0..sequences.len() {
         let sequence = &sequences[seq_id];
         for t in 0..sequence.len() {
-            idx += 1;
             if idx % 10000 == 0 {
                 println!("{}/{}", idx, total_length);
             }
+            idx += 1;
             // Check if the layer is constrained?
             let comp_id = constraints.get_comp_id(seq_id, t);
-            let is_constrained = comp_id != -1;
+            let prop_t: f64 = rng.gen();
+            let is_constrained = prop_t < prop_cstr && comp_id != -1;
 
             if is_constrained {
                 for state_to in 0..hmm.nstates() {

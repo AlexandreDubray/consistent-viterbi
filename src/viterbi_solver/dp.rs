@@ -36,18 +36,29 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
     dp_entry_source.update(0.0, None, 0);
     table.insert((0, 0), dp_entry_source);
 
+    let mut nb_elem_cstr: Vec<(usize, usize)> = (0..sequences.len()).map(|seq_id| -> (usize, usize) {
+        let mut count = 0;
+        for t in 0..sequences[seq_id].len() {
+            if constraints.get_comp_id(seq_id, t) != -1 {
+                count += 1;
+            }
+        }
+        (count, seq_id)
+    }).collect();
+    nb_elem_cstr.sort();
+
     let mut rng = rand::thread_rng();
     
     let mut idx = 0;
-    for seq_id in 0..sequences.len() {
-        let sequence = &sequences[seq_id];
+    for (_, seq_id) in &nb_elem_cstr {
+        let sequence = &sequences[*seq_id];
         for t in 0..sequence.len() {
             if idx % 10000 == 0 {
                 println!("{}/{}", idx, total_length);
             }
             idx += 1;
             // Check if the layer is constrained?
-            let comp_id = constraints.get_comp_id(seq_id, t);
+            let comp_id = constraints.get_comp_id(*seq_id, t);
             let prop_t: f64 = rng.gen();
             let is_constrained = prop_t < prop_cstr && comp_id != -1;
 
@@ -115,7 +126,7 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
     let mut best_cstr_path = 0;
     let mut best_cost = f64::NEG_INFINITY;
     for state in 0..hmm.nstates() {
-        match table.get(&(total_length, state)) {
+        match table.get(&(idx, state)) {
             Some(entry) => {
                 for (cstr_path_idx, value) in &entry.cstr_paths {
                     if value.0 > best_cost {
@@ -131,7 +142,8 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
     
     let mut sol = sequences.map(|x| -> Array1<usize> { Array1::from_elem(x.len(), 0) });
     let mut current  = dp_entry_target.unwrap();
-    for seq_id in (0..sequences.len()).rev() {
+    for i in (0..nb_elem_cstr.len()).rev() {
+        let seq_id = nb_elem_cstr[i].1;
         for t in (0..sequences[seq_id].len()).rev() {
             sol[seq_id][t] = current.state;
             let (_, from) = current.cstr_paths.get(&best_cstr_path).unwrap();

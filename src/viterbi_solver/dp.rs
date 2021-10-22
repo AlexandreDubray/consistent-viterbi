@@ -92,11 +92,17 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
 
     let ordering = get_sequences_ordering(hmm, sequences, constraints);
 
+    let mut finished_constraints: Vec<usize> = Vec::new();
 
     let mut idx = 0;
+
+    let mut should_prune = false;
     for seq_id in &ordering {
         let sequence = &sequences[*seq_id];
         for t in 0..sequence.len() {
+            if idx % 100 == 0 {
+                println!("{}/{} {} nodes in the cstr_tree", idx, total_length, arena.count());
+            }
             idx += 1;
             // Check if the layer is constrained?
             let comp_id = constraints.get_comp_id(*seq_id, t);
@@ -134,6 +140,62 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
                             };
                         }
                     }
+                    // TODO: clean DPEntry for every dominated path
+                    // Let assume that we saw the last elements of Ci, every path of constraints
+                    // looks like
+                    // <_, _, ..., i1, ...>
+                    // <_, _, ..., i2, ...>
+                    // <_, _, ..., i3, ...>
+                    // ...
+                    // <_, _, ..., in, ...>
+                    //
+                    // if for two different i's, the rest of the choices are the same, we can
+                    // discard the choices with the lowest value (since whatever happens in the
+                    // rest of the DAG, it will apply to both choices paths)
+
+                    if is_constrained && (*seq_id, t) == constraints.last_elements[comp_id as usize] {
+                        should_prune = true;
+                        finished_constraints.push(comp_id as usize);
+                    }
+
+                    if should_prune {
+                        let mut to_remove: Vec<NodeId> = Vec::new();
+                        for finished_cstr in &finished_constraints {
+                            let cstr_node_ids: Vec<&NodeId> = dp_entry.cstr_paths.keys().collect();
+                            for i in 0..cstr_node_ids.len() {
+                                for j in i+1..cstr_node_ids.len() {
+                                    let n1 = cstr_node_ids[i];
+                                    let n2 = cstr_node_ids[j];
+                                    let d1 = arena.get(*n1).unwrap().get();
+                                    let d2 = arena.get(*n2).unwrap().get();
+                                    let mut same = true;
+                                    for k in 0..d1.len() {
+                                        if k != *finished_cstr && d1[k] != d2[k] {
+                                            same = false;
+                                            break;
+                                        }
+                                    }
+
+                                    // Only keep the best one
+                                    if same {
+                                        let v1 = dp_entry.cstr_paths.get(n1).unwrap().0;
+                                        let v2 = dp_entry.cstr_paths.get(n2).unwrap().0;
+                                        if v1 > v2 {
+                                            to_remove.push(n2.to_owned());
+                                        } else {
+                                            to_remove.push(n1.to_owned());
+                                        }
+                                    }
+                                }
+                            }
+
+                        }
+                        for tr in to_remove {
+                            dp_entry.cstr_paths.remove(&tr);
+                        }
+                        //should_prune = false;
+                    }
+
                     if updated {
                         table.insert((idx, state_to), dp_entry);
                     }

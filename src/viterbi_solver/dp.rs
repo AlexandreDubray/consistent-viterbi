@@ -28,18 +28,27 @@ impl DPEntry {
     }
 }
 
-fn get_sequences_ordering(sequences: &Array1<Array1<usize>>, constraints: &Constraints) -> Vec<(usize, usize)> {
-    let mut nb_elem_cstr: Vec<(usize, usize)> = (0..sequences.len()).map(|seq_id| -> (usize, usize) {
+fn get_sequences_ordering(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Constraints) -> Vec<usize> {
+    let mut nb_elem_cstr: Vec<(f64, usize)> = (0..sequences.len()).map(|seq_id| -> (f64, usize) {
         let mut count = 0;
+        let mut possible_state_per_cstr = 0;
         for t in 0..sequences[seq_id].len() {
-            if constraints.get_comp_id(seq_id, t) != -1 {
+            let comp = constraints.get_comp_id(seq_id, t) ;
+            if comp != -1 {
+                // Estimate the number of possible state
+                for state in 0..hmm.nstates() {
+                    if hmm.emit_prob(state, sequences[seq_id][t]) > f64::NEG_INFINITY {
+                        possible_state_per_cstr += 1;
+                    }
+                }
                 count += 1;
             }
         }
-        (count, seq_id)
+        let average_state_per_cstr = if count == 0 { 0.0 } else { possible_state_per_cstr as f64 / count as f64 };
+        (average_state_per_cstr, seq_id)
     }).collect();
-    nb_elem_cstr.sort();
-    nb_elem_cstr
+    nb_elem_cstr.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (0..nb_elem_cstr.len()).map(|x| -> usize { nb_elem_cstr[x].1 }).collect()
 }
 
 fn get_child(arena: &mut Arena<Array1<i32>>, node_idx: NodeId, comp_choice: usize, state_choice: usize) -> NodeId {
@@ -81,16 +90,13 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
     dp_entry_source.update(0.0, None, root);
     table.insert((0, 0), dp_entry_source);
 
-    let ordering = get_sequences_ordering(sequences, constraints);
+    let ordering = get_sequences_ordering(hmm, sequences, constraints);
 
 
     let mut idx = 0;
-    for (_, seq_id) in &ordering {
+    for seq_id in &ordering {
         let sequence = &sequences[*seq_id];
         for t in 0..sequence.len() {
-            if idx % 100 == 0 {
-                println!("{}/{} {} nodes in the cstr_tree", idx, total_length, arena.count());
-            }
             idx += 1;
             // Check if the layer is constrained?
             let comp_id = constraints.get_comp_id(*seq_id, t);
@@ -157,7 +163,7 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
     let mut sol = sequences.map(|x| -> Array1<usize> { Array1::from_elem(x.len(), 0) });
     let mut current  = dp_entry_target.unwrap();
     for i in (0..ordering.len()).rev() {
-        let seq_id = ordering[i].1;
+        let seq_id = ordering[i];
         for t in (0..sequences[seq_id].len()).rev() {
             sol[seq_id][t] = current.state;
             let (_, from) = current.cstr_paths.get(&best_cstr_path.unwrap()).unwrap();

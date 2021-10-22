@@ -1,13 +1,16 @@
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::fs::File;
-use ndarray::Array1;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashMap;
+
+use rand::prelude::*;
+
 
 pub struct Constraints {
-    pub components: Array1<Vec<(usize, usize)>>,
-    pub constrained_elements: HashSet<(usize, usize)>,
-    map_elem_comp_id: HashMap<(usize, usize), usize>
+    pub components: Vec<Vec<(usize, usize)>>,
+    pub last_elements: Vec<(usize, usize)>,
+    full_components: Vec<Vec<(usize, usize)>>,
+    map_elem_comp_id: HashMap<(usize, usize), usize>,
 }
 
 impl Constraints {
@@ -24,9 +27,8 @@ impl Constraints {
         let reader = BufReader::new(file);
         // Each component is separated by an empty line
         let mut component: Vec<(usize, usize)> = Vec::new();
-        let mut constrained_elements: HashSet<(usize, usize)> = HashSet::new();
         
-        let mut components: Vec<Vec<(usize, usize)>> = Vec::new();
+        let mut full_components: Vec<Vec<(usize, usize)>> = Vec::new();
         for line in reader.lines() {
             let line = match line {
                 Ok(l) => l,
@@ -34,27 +36,47 @@ impl Constraints {
             };
             if line == "" {
                 if component.len() > 1 {
-                    components.push(component);
+                    full_components.push(component);
                 }
                 component = Vec::new();
             } else {
                 let mut split = line.split_whitespace();
                 let seq_id = Constraints::parse_usize(split.next().unwrap());
                 let timestamp = Constraints::parse_usize(split.next().unwrap());
-                constrained_elements.insert((seq_id, timestamp));
                 component.push((seq_id, timestamp));
             }
         }
         if component.len() > 1 {
-            components.push(component);
+            full_components.push(component);
         }
-        let mut map_elem_comp_id: HashMap<(usize, usize), usize> = HashMap::new();
-        for comp_id in 0..components.len() {
-            for elem in &components[comp_id] {
-                map_elem_comp_id.insert(*elem, comp_id);
+        let components: Vec<Vec<(usize, usize)>> = Vec::new();
+        let map_elem_comp_id: HashMap<(usize, usize), usize> = HashMap::new();
+        let last_elements: Vec<(usize, usize)> = Vec::new();
+        Self {components, last_elements, full_components, map_elem_comp_id}
+    }
+
+    pub fn keep_prop(&mut self, prop: f64) {
+        self.components.clear();
+        self.last_elements.clear();
+        self.map_elem_comp_id.clear();
+
+        let mut rng = thread_rng();
+        let mut current_comp: Vec<(usize, usize)> = Vec::new();
+        for i in 0..self.full_components.len() {
+            for elem in &self.full_components[i] {
+                if rng.gen::<f64>() < prop {
+                    current_comp.push(*elem);
+                    self.map_elem_comp_id.insert(*elem, self.components.len());
+                }
+            }
+            if current_comp.len() > 1 {
+                self.last_elements.push(*current_comp.last().unwrap());
+                self.components.push(current_comp);
+                current_comp = Vec::new();
+            } else if current_comp.len() == 1 {
+                self.map_elem_comp_id.remove(&current_comp[0]);
             }
         }
-        Self { components: Array1::from_vec(components), constrained_elements, map_elem_comp_id}
     }
 
     pub fn get_comp_id(&self, seq_id: usize, time: usize) -> i32 {

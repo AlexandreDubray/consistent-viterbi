@@ -1,7 +1,6 @@
 use gurobi::*;
 use ndarray::Array1;
 use std::collections::HashMap;
-use rand::Rng;
 use std::time::Instant;
 
 use super::hmm::HMM;
@@ -10,7 +9,7 @@ use super::constraints::Constraints;
 pub struct GlobalOpti<'a> {
     hmm: &'a HMM,
     sequences: &'a Array1<Array1<usize>>,
-    constraints: &'a Constraints,
+    constraints: &'a mut Constraints,
     model: Model,
     consistency_constraints: Vec<Constr>,
     inflow_map: HashMap<(usize, usize, usize), LinExpr>,
@@ -19,7 +18,7 @@ pub struct GlobalOpti<'a> {
 
 impl<'b> GlobalOpti<'b> {
 
-    pub fn new(hmm: &'b HMM, sequences: &'b Array1<Array1<usize>>, constraints: &'b Constraints) -> Self {
+    pub fn new(hmm: &'b HMM, sequences: &'b Array1<Array1<usize>>, constraints: &'b mut Constraints) -> Self {
         let mut env = Env::new("logfile.log").unwrap();
         env.set(param::OutputFlag, 0).unwrap();
         let model = Model::new("model", &env).unwrap();
@@ -97,7 +96,7 @@ impl<'b> GlobalOpti<'b> {
                                 }
                             }
                         }
-                        if self.constraints.constrained_elements.contains(&(i, t)) {
+                        if self.constraints.get_comp_id(i, t) != -1 {
                             self.inflow_map.insert((i, t, state), inflow.clone());
                         }
                         let diff_flow = inflow - outflow;
@@ -119,39 +118,36 @@ impl<'b> GlobalOpti<'b> {
     }
 
     pub fn solve(&mut self, prop_consistency_cstr: f64) -> u64 {
+        self.constraints.keep_prop(prop_consistency_cstr);
         self.model.reset().unwrap();
         for cstr in &mut self.consistency_constraints {
             cstr.remove();
         }
         self.consistency_constraints.clear();
-        let mut rng = rand::thread_rng();
         for component in &self.constraints.components {
             for i in 0..component.len()-1 {
-                let x: f64 = rng.gen();
-                if x <= prop_consistency_cstr {
-                    let (s1, t1) = component[i];
-                    let (s2, t2) = component[i+1];
-                    for state in 0..self.hmm.nstates() {
-                        let mut found = false;
-                        let inflow_s1 = match self.inflow_map.get(&(s1, state, t1)) {
-                            Some(f) => {
-                                found = true;
-                                f.clone()
-                            },
-                            None => LinExpr::new()
-                        };
-                        let inflow_s2 = match self.inflow_map.get(&(s2, state, t2)) {
-                            Some(f) => {
-                                found = true;
-                                f.clone()
-                            },
-                            None => LinExpr::new()
-                        };
-                        if found {
-                            let diff_flow = inflow_s1 - inflow_s2;
-                            let cstr = self.model.add_constr("", diff_flow, Equal, 0.0).unwrap();
-                            self.consistency_constraints.push(cstr);
-                        }
+                let (s1, t1) = component[i];
+                let (s2, t2) = component[i+1];
+                for state in 0..self.hmm.nstates() {
+                    let mut found = false;
+                    let inflow_s1 = match self.inflow_map.get(&(s1, state, t1)) {
+                        Some(f) => {
+                            found = true;
+                            f.clone()
+                        },
+                        None => LinExpr::new()
+                    };
+                    let inflow_s2 = match self.inflow_map.get(&(s2, state, t2)) {
+                        Some(f) => {
+                            found = true;
+                            f.clone()
+                        },
+                        None => LinExpr::new()
+                    };
+                    if found {
+                        let diff_flow = inflow_s1 - inflow_s2;
+                        let cstr = self.model.add_constr("", diff_flow, Equal, 0.0).unwrap();
+                        self.consistency_constraints.push(cstr);
                     }
                 }
             }

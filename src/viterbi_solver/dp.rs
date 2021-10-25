@@ -96,7 +96,6 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
 
     let mut idx = 0;
 
-    let mut should_prune = false;
     for seq_id in &ordering {
         let sequence = &sequences[*seq_id];
         for t in 0..sequence.len() {
@@ -192,7 +191,6 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
                         for tr in to_remove {
                             dp_entry.cstr_paths.remove(&tr);
                         }
-                        //should_prune = false;
                     }
 
                     if updated {

@@ -152,11 +152,13 @@ pub fn dp_solving(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &Co
                     // discard the choices with the lowest value (since whatever happens in the
                     // rest of the DAG, it will apply to both choices paths)
 
+                    let mut should_prune = false;
                     if is_constrained && (*seq_id, t) == constraints.last_elements[comp_id as usize] {
+                        should_prune = true;
                         finished_constraints.push(comp_id as usize);
                     }
 
-                    if is_constrained {
+                    if should_prune {
                         let mut to_remove: Vec<NodeId> = Vec::new();
                         for finished_cstr in &finished_constraints {
                             let cstr_node_ids: Vec<&NodeId> = dp_entry.cstr_paths.keys().collect();

@@ -5,7 +5,6 @@ use indextree::Arena;
 use indextree::NodeId;
 
 use super::hmm::HMM;
-use super::constraints::Constraints;
 use super::utils::SuperSequence;
 
 type Backtrack = (usize, usize, NodeId);
@@ -64,7 +63,7 @@ fn get_child(arena: &mut Arena<Array1<i32>>, node_idx: NodeId, comp_choice: usiz
     new_id
 }
 
-pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence, constraints: &Constraints) -> Array1<usize> {
+pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
     let mut table: HashMap<(i32, usize), DPEntry> = HashMap::with_capacity(sequence.len()*hmm.nstates()/10);
 
     let arena = &mut Arena::new();

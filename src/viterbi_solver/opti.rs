@@ -16,7 +16,7 @@ impl<'b> GlobalOpti<'b> {
 
     pub fn new(hmm: &'b HMM, sequence: &'b SuperSequence) -> Self {
         let mut env = Env::new("logfile.log").unwrap();
-        //env.set(param::OutputFlag, 0).unwrap();
+        env.set(param::OutputFlag, 0).unwrap();
         let model = Model::new("model", &env).unwrap();
         let solution = Array1::from_elem(sequence.len(), 0);
         Self {hmm, sequence, model, solution}

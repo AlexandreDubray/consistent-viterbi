@@ -5,7 +5,7 @@ use ndarray_stats::QuantileExt;
 pub struct HMM {
     pub a: Array2<f64>,
     pub b: Array2<f64>,
-    pi: Array1<f64>,
+    pub pi: Array1<f64>,
     viterbi_array: Array2<f64>,
     viterbi_bt: Array2<usize>
 }
@@ -77,10 +77,6 @@ impl HMM {
 
     pub fn transition_prob(&self, state_from: usize, state_to: usize, obs: usize) -> f64 {
         self.a[[state_from, state_to]] + self.b[[state_to, obs]]
-    }
-
-    pub fn transitions_from(&self, state_from: usize) -> ArrayView1<f64> {
-        self.a.slice(s![state_from, ..])
     }
 
     pub fn transitions_to(&self, state_to: usize) -> ArrayView1<f64> {

@@ -12,6 +12,7 @@ use viterbi_solver::hmm::HMM;
 use viterbi_solver::constraints::Constraints;
 use viterbi_solver::opti::GlobalOpti;
 use viterbi_solver::dp::dp_solving;
+use viterbi_solver::utils::SuperSequence;
 
 
 fn viterbi(hmm: &mut HMM, sequences: &Array1<Array1<usize>>, tags: &Array1<Array1<usize>>) {
@@ -28,16 +29,18 @@ fn viterbi(hmm: &mut HMM, sequences: &Array1<Array1<usize>>, tags: &Array1<Array
     println!("Error rate {:.5} in {} sec", error_rate, elapsed);
 }
 
-fn global_opti(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &mut Constraints, prop_consistency_cstr: f64, tags: &Array1<Array1<usize>>) {
-    let mut model = GlobalOpti::new(hmm, sequences, constraints);
+fn global_opti(hmm: &HMM, sequence: &SuperSequence, constraints: &mut Constraints, tags: &Array1<Array1<usize>>) {
+    let mut model = GlobalOpti::new(hmm, sequence);
     model.build_model();
-    let time = model.solve(prop_consistency_cstr);
-    let solutions = model.get_solutions();
-    let error_rate = error_rate(solutions, tags);
-    println!("Error rate {:.5} in {} sec", error_rate, time);
+    let time = model.solve();
+    let predictions = model.get_solutions();
+    let solution = sequence.parse_solution(predictions);
+    let error_rate = error_rate(&solution, tags);
+    println!("Error rate is {:5} in {} secs", error_rate, time);
 }
 
 fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &mut Constraints, tags: &Array1<Array1<usize>>, config: &utils::Config) {
+    /*
     let nb_repeat = 10;
     let mut output = File::create(config.output_path()).unwrap();
     let mut model = GlobalOpti::new(hmm, sequences, constraints);
@@ -50,28 +53,31 @@ fn global_opti_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &m
         let s = format!("{:.5} {}\n", error_rate, runtime);
         output.write(s.as_bytes()).unwrap();
     }
+    */
 }
 
-fn dp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &mut Constraints, tags: &Array1<Array1<usize>>, prop_consistency_cstr: f64) {
+fn dp(hmm: &HMM, sequence: &SuperSequence, constraints: &mut Constraints, tags: &Array1<Array1<usize>>, prop_consistency_cstr: f64) {
     let start = Instant::now();
     constraints.keep_prop(prop_consistency_cstr);
     println!("Start predictions");
-    let predictions = dp_solving(hmm, sequences, constraints);
+    let predictions = dp_solving(hmm, sequence, constraints);
     let elapsed = start.elapsed().as_secs();
-    let error_rate = error_rate(&predictions, tags);
-    println!("Error rate {:.5} in {} secs", error_rate, elapsed);
+    let solution = sequence.parse_solution(&predictions);
+    let error_rate = error_rate(&solution, tags);
+    println!("Error rate is {:5} in {} secs", error_rate, elapsed);
 }
 
-fn dp_exp(hmm: &HMM, sequences: &Array1<Array1<usize>>, constraints: &mut Constraints, tags: &Array1<Array1<usize>>, config: &utils::Config) {
+fn dp_exp(hmm: &HMM, sequence: &SuperSequence, constraints: &mut Constraints, tags: &Array1<Array1<usize>>, config: &utils::Config) {
     let nb_repeat = 10;
     let mut output = File::create(config.output_path()).unwrap();
     for i in 0..nb_repeat {
         println!("config {:.2} {}/{}", config.get_prop(), i+1, nb_repeat);
         constraints.keep_prop(config.get_prop());
         let start = Instant::now();
-        let predictions = dp_solving(hmm, sequences, constraints);
+        let predictions = dp_solving(hmm, sequence, constraints);
         let runtime = start.elapsed().as_secs();
-        let error_rate = error_rate(&predictions, tags);
+        let solution = sequence.parse_solution(&predictions);
+        let error_rate = error_rate(&solution, tags);
         let s = format!("{:.5} {}\n", error_rate, runtime);
         output.write(s.as_bytes()).unwrap();
     }
@@ -125,17 +131,23 @@ fn main() {
     let mut hmm = HMM::new(&sequences, &tags, config.nstates, config.nobs);
     let mut constraints = config.get_constraints();
 
+    if !exp {
+        constraints.keep_prop(config.get_prop());
+    }
+
+    let super_seq = SuperSequence::from(&sequences, &constraints, &hmm);
+
     if config.is_global_opti() {
         if exp {
             global_opti_exp(&hmm, &sequences, &mut constraints, &tags, &config);
         } else {
-            global_opti(&hmm, &sequences, &mut constraints, config.get_prop(), &tags);
+            global_opti(&hmm, &super_seq, &mut constraints, &tags);
         }
     } else if config.is_dp() {
         if exp {
-            dp_exp(&hmm, &sequences, &mut constraints, &tags, &config);
+            dp_exp(&hmm, &super_seq, &mut constraints, &tags, &config);
         } else {
-            dp(&hmm, &sequences, &mut constraints, &tags, config.get_prop());
+            dp(&hmm, &super_seq, &mut constraints, &tags, config.get_prop());
         }
     } else if config.is_viterbi() {
         viterbi(&mut hmm, &sequences, &tags);

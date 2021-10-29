@@ -1,158 +1,136 @@
 use gurobi::*;
 use ndarray::Array1;
-use std::collections::HashMap;
 use std::time::Instant;
 
 use super::hmm::HMM;
-use super::constraints::Constraints;
+use super::utils::SuperSequence;
 
 pub struct GlobalOpti<'a> {
     hmm: &'a HMM,
-    sequences: &'a Array1<Array1<usize>>,
-    constraints: &'a mut Constraints,
+    sequence: &'a SuperSequence,
     model: Model,
-    consistency_constraints: Vec<Constr>,
-    inflow_map: HashMap<(usize, usize, usize), LinExpr>,
-    solutions: Array1<Array1<usize>>
+    solution: Array1<usize>,
 }
 
 impl<'b> GlobalOpti<'b> {
 
-    pub fn new(hmm: &'b HMM, sequences: &'b Array1<Array1<usize>>, constraints: &'b mut Constraints) -> Self {
+    pub fn new(hmm: &'b HMM, sequence: &'b SuperSequence) -> Self {
         let mut env = Env::new("logfile.log").unwrap();
-        env.set(param::OutputFlag, 0).unwrap();
+        //env.set(param::OutputFlag, 0).unwrap();
         let model = Model::new("model", &env).unwrap();
-        let consistency_constraints: Vec<Constr> = Vec::new();
-        let inflow_map: HashMap<(usize, usize, usize), LinExpr> = HashMap::new();
-        let solutions = Array1::from_iter(0..sequences.len()).map(|seq_id| -> Array1<usize> { Array1::from_elem(sequences[*seq_id].len(), 0) });
-        Self {hmm, sequences, constraints, model, consistency_constraints, inflow_map, solutions}
+        let solution = Array1::from_elem(sequence.len(), 0);
+        Self {hmm, sequence, model, solution}
     }
 
-    fn add_var(&mut self, p: f64, name: String) -> Var {
+    fn add_var(&mut self, p: f64, idx: usize, state_from: usize, state_to: usize) -> Var {
+        let name = format!("{}-{}-{}", idx, state_from, state_to);
         self.model.add_var(&name, Binary, p, 0.0, 1.0, &[], &[]).unwrap()
     }
 
+    fn compute_outflow(&mut self, state_from: usize, idx: i32, inflow_cache: &mut Vec<Option<LinExpr>>) -> LinExpr {
+        let mut outflow = LinExpr::new();
+        let n_idx = (idx + 1) as usize;
+        for other_state in 0..self.hmm.nstates() {
+            let next_elem = &self.sequence[n_idx];
+            let arc_p = next_elem.arc_p(self.hmm, state_from, other_state);
+            if arc_p > f64::NEG_INFINITY {
+                let arc = self.add_var(arc_p, n_idx, state_from, other_state);
+                outflow += arc.clone();
+                match &mut inflow_cache[other_state] {
+                    Some(f) => {
+                        *f += arc.clone();
+                    },
+                    None => {
+                        let mut f = LinExpr::new();
+                        f += arc.clone();
+                        inflow_cache[other_state] = Some(f);
+                    }
+                };
+            }
+        }
+        outflow
+    }
+
     pub fn build_model(&mut self) {
-        let mut objective = LinExpr::new();
-        for i in 0..self.sequences.len() {
-            let sequence = &self.sequences[i];
-            let mut source_flow = LinExpr::new();
-            let mut target_flow = LinExpr::new();
 
-            let mut next_inflows: Array1<LinExpr> = Array1::from_elem(self.hmm.nstates(), LinExpr::new());
-            let mut current_inflows: Array1<LinExpr> = Array1::from_elem(self.hmm.nstates(), LinExpr::new());
-            for t in 0..sequence.len() {
+        let mut cstr_inflow_cache: Vec<Vec<Option<LinExpr>>> = (0..self.sequence.nb_cstr).map(|_| -> Vec<Option<LinExpr>> {
+            (0..self.hmm.nstates()).map(|_| None).collect()
+        }).collect();
+        let mut inflow_cache: Vec<Option<LinExpr>> = (0..self.hmm.nstates()).map(|_| None).collect();
+        let mut inflow_tmp: Vec<Option<LinExpr>> = (0..self.hmm.nstates()).map(|_| None).collect();
+
+        let source_flow = self.compute_outflow(0, -1, &mut inflow_cache);
+        self.model.add_constr("", source_flow, Equal, 1.0).unwrap();
+        let mut target_flow = LinExpr::new();
+
+
+        for idx in 0..self.sequence.len() {
+            if idx % 10000 == 0 {
+                println!("{}/{}", idx, self.sequence.len());
+            }
+            let element = &self.sequence[idx];
+            let is_constrained = element.constraint_component != -1;
+            if idx != self.sequence.len() - 1 {
+                for i in (0..self.hmm.nstates()).rev() {
+                    inflow_tmp[i] = inflow_cache.remove(i);
+                }
+
+                for _ in 0..self.hmm.nstates() {
+                    inflow_cache.push(None);
+                }
+
                 for state in 0..self.hmm.nstates() {
-                    let emit_prob = self.hmm.emit_prob(state, sequence[t]);
-                    if emit_prob > f64::NEG_INFINITY {
-                        let mut inflow = current_inflows[state].clone();
-                        let mut outflow = LinExpr::new();
-                        if t == 0 {
-                            // Variable from source to state node
-                            let from_source_p = self.hmm.init_prob(state, sequence[0]);
-                            if from_source_p > f64::NEG_INFINITY {
-                                let name = format!("{}-{}-{}-{}", i, 0, state, t);
-                                let from_source = self.add_var(from_source_p, name);
-                                source_flow += from_source.clone();
-                                inflow += from_source.clone();
-                                objective += from_source.clone()*from_source_p;
-
-                                if sequence.len() == 1 {
-                                    // Also the last layer
-                                    let name = format!("{}-{}-{}-{}", i, state, 0, t+1);
-                                    let arc_out = self.add_var(0.0, name);
-                                    outflow += arc_out.clone();
-                                    target_flow += arc_out.clone();
-                                } else {
-                                    // Variable to states of the next layer
-                                    let transitions = self.hmm.transitions_from(state);
-                                    for state_to in 0..self.hmm.nstates() {
-                                        let arc_p = transitions[state_to] + self.hmm.emit_prob(state_to, sequence[t+1]);
-                                        if arc_p > f64::NEG_INFINITY {
-                                            let name = format!("{}-{}-{}-{}", i, state, state_to, t+1);
-                                            let arc_var = self.add_var(arc_p, name);
-                                            outflow += arc_var.clone();
-                                            next_inflows[state_to] += arc_var.clone();
-                                            objective += arc_var.clone()*arc_p;
-                                        }
-                                    }
-                                }
+                    match inflow_tmp[state].as_ref() {
+                        Some(inflow) => {
+                            if is_constrained {
+                                let ucomp = element.constraint_component as usize;
+                                match &cstr_inflow_cache[ucomp][state] {
+                                    Some(f) => {
+                                        let dflow = (*f).clone() - (*inflow).clone();
+                                        self.model.add_constr("", dflow, Equal, 0.0).unwrap();
+                                        cstr_inflow_cache[ucomp][state] = Some(inflow.clone());
+                                    },
+                                    None => cstr_inflow_cache[ucomp][state] = Some(inflow.clone())
+                                };
                             }
-                        } else if t == sequence.len() - 1 {
-                            let name = format!("{}-{}-{}-{}", i, state, 0, t+1);
-                            let arc_out = self.add_var(0.0, name);
-                            outflow += arc_out.clone();
-                            target_flow += arc_out.clone();
-                        } else {
-                            let transitions = self.hmm.transitions_from(state);
-                            for state_to in 0..self.hmm.nstates() {
-                                let arc_p = transitions[state_to] + self.hmm.emit_prob(state_to, sequence[t+1]);
-                                if arc_p > f64::NEG_INFINITY {
-                                    let name = format!("{}-{}-{}-{}", i, state, state_to, t+1);
-                                    let arc_var = self.add_var(arc_p, name);
-                                    outflow += arc_var.clone();
-                                    next_inflows[state_to] += arc_var.clone();
-                                    objective += arc_var.clone()*arc_p;
-                                }
-                            }
-                        }
-                        if self.constraints.get_comp_id(i, t) != -1 {
-                            self.inflow_map.insert((i, t, state), inflow.clone());
-                        }
-                        let diff_flow = inflow - outflow;
-                        self.model.add_constr("", diff_flow, Equal, 0.0).unwrap();
+                            let outflow = self.compute_outflow(state, idx as i32, &mut inflow_cache);
+                            let diff_flow = (*inflow).clone() - outflow;
+                            self.model.add_constr("", diff_flow, Equal, 0.0).unwrap();
+                        },
+                        None => ()
                     }
                 }
-                current_inflows = next_inflows;
-                next_inflows = Array1::from_elem(self.hmm.nstates(), LinExpr::new());
+            } else {
+                for state in 0..self.hmm.nstates() {
+                    match &inflow_cache[state] {
+                        Some(inflow) => {
+                            if is_constrained {
+                                let inflow_eq = cstr_inflow_cache[element.constraint_component as usize][state].as_ref().unwrap();
+                                let dflow = (*inflow_eq).clone() - (*inflow).clone();
+                                self.model.add_constr("", dflow, Equal, 0.0).unwrap();
+                            }
+                            let arc = self.add_var(0.0, idx+1, state, 0);
+                            target_flow += arc.clone();
+                            let mut outflow = LinExpr::new();
+                            outflow += arc.clone();
+                            let diff_flow = (*inflow).clone() - outflow;
+                            self.model.add_constr("", diff_flow, Equal, 0.0).unwrap();
+                        },
+                        None => ()
+                    };
+                }
             }
-            self.model.add_constr("", source_flow, Equal, 1.0).unwrap();
-            self.model.add_constr("", target_flow, Equal, 1.0).unwrap();
         }
-
-        match self.model.update() {
-            Ok(_) => (),
-            Err(error) => panic!("Can not update the model: {:?}", error)
-        };
+        self.model.add_constr("", target_flow, Equal, 1.0).unwrap();
+        self.model.update().unwrap();
+        let mut objective = LinExpr::new();
+        let vars: Vec<Var> = self.model.get_vars().map(|x| (*x).clone()).collect();
+        let coefs: Vec<f64> = (0..vars.len()).map(|i| vars[i].get(&self.model, attr::Obj).unwrap()).collect();
+        objective = objective.add_terms(&coefs, &vars);
         self.model.set_objective(objective, Maximize).unwrap();
     }
 
-    pub fn solve(&mut self, prop_consistency_cstr: f64) -> u64 {
-        self.constraints.keep_prop(prop_consistency_cstr);
-        self.model.reset().unwrap();
-        for cstr in &mut self.consistency_constraints {
-            cstr.remove();
-        }
-        self.consistency_constraints.clear();
-        for component in &self.constraints.components {
-            for i in 0..component.len()-1 {
-                let (s1, t1) = component[i];
-                let (s2, t2) = component[i+1];
-                for state in 0..self.hmm.nstates() {
-                    let mut found = false;
-                    let inflow_s1 = match self.inflow_map.get(&(s1, state, t1)) {
-                        Some(f) => {
-                            found = true;
-                            f.clone()
-                        },
-                        None => LinExpr::new()
-                    };
-                    let inflow_s2 = match self.inflow_map.get(&(s2, state, t2)) {
-                        Some(f) => {
-                            found = true;
-                            f.clone()
-                        },
-                        None => LinExpr::new()
-                    };
-                    if found {
-                        let diff_flow = inflow_s1 - inflow_s2;
-                        let cstr = self.model.add_constr("", diff_flow, Equal, 0.0).unwrap();
-                        self.consistency_constraints.push(cstr);
-                    }
-                }
-            }
-        }
-        self.model.update().unwrap();
+    pub fn solve(&mut self) -> u64 {
         let start = Instant::now();
         match self.model.optimize() {
             Ok(_) => (),
@@ -161,27 +139,26 @@ impl<'b> GlobalOpti<'b> {
         start.elapsed().as_secs()
     }
 
-    fn arc_from_name(&self, var: &Var) -> (usize, usize, usize) {
+    fn arc_from_name(&self, var: &Var) -> (usize, usize) {
         let name = &self.model.get_values(attr::VarName, &[var.clone()]).unwrap()[0];
         let mut split = name.split("-");
-        let seq_id: usize = split.next().unwrap().parse().unwrap();
+        let idx: usize = split.next().unwrap().parse().unwrap();
         let _state_from: usize = split.next().unwrap().parse().unwrap();
         let state_to: usize = split.next().unwrap().parse().unwrap();
-        let t: usize = split.next().unwrap().parse().unwrap();
-        (seq_id, state_to, t)
+        (idx, state_to)
     }
 
-    pub fn get_solutions(&mut self) -> &Array1<Array1<usize>> {
+    pub fn get_solutions(&mut self) -> &Array1<usize> {
         for var in self.model.get_vars() {
             let value = self.model.get_values(attr::X, &[var.clone()]).unwrap()[0];
             if value == 1.0 {
-                let (seq_id, state_to, t) = self.arc_from_name(var);
-                if t < self.sequences[seq_id].len() {
-                    self.solutions[seq_id][t] = state_to;
+                let (idx, state_to) = self.arc_from_name(var);
+                if idx < self.sequence.len() {
+                    self.solution[idx] = state_to;
                 }
             }
 
         }
-        &self.solutions
+        &self.solution
     }
 }

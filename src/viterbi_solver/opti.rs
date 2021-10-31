@@ -132,10 +132,7 @@ impl<'b> GlobalOpti<'b> {
 
     pub fn solve(&mut self) -> u64 {
         let start = Instant::now();
-        match self.model.optimize() {
-            Ok(_) => (),
-            Err(error) => panic!("Could not solve the model: {:?}", error)
-        };
+        self.model.optimize().unwrap();
         start.elapsed().as_secs()
     }
 

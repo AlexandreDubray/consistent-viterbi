@@ -18,6 +18,7 @@ impl HMM {
         let mut pi = Array1::from_elem(nstates, 0.0);
 
         let mut seen_states = Array1::from_elem(nstates, 0.0);
+        let mut end_states = Array1::from_elem(nstates, 0.0);
 
         let mut max_seq_size = 0;
 
@@ -27,9 +28,6 @@ impl HMM {
             max_seq_size = max_seq_size.max(sequence.len());
 
             pi[tag[0]] += 1.0;
-            if sequence.len() == 1 {
-                seen_states[tag[0]] += 1.0;
-            }
             for t in 0..sequence.len() - 1 {
                 b[[tag[t], sequence[t]]] += 1.0;
                 a[[tag[t], tag[t+1]]] += 1.0;
@@ -37,6 +35,7 @@ impl HMM {
             }
             b[[tag[sequence.len()-1], sequence[sequence.len()-1]]] += 1.0;
             seen_states[tag[sequence.len()-1]] += 1.0;
+            end_states[tag[sequence.len()-1]] += 1.0;
         }
 
         let log_mapping = |x: &mut f64| {
@@ -49,8 +48,8 @@ impl HMM {
 
         for state in 0..nstates {
             let mut a_row = a.row_mut(state);
-            if seen_states[state] != pi[state] {
-                a_row /= seen_states[state] - pi[state];
+            if seen_states[state] != end_states[state] {
+                a_row /= seen_states[state] - end_states[state];
             } else {
                 a_row.fill(0.0); 
             }

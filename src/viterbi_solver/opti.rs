@@ -127,10 +127,10 @@ impl<'b> GlobalOpti<'b> {
         self.model.set_objective(objective, Maximize).unwrap();
     }
 
-    pub fn solve(&mut self) -> u64 {
+    pub fn solve(&mut self) -> u128 {
         let start = Instant::now();
         self.model.optimize().unwrap();
-        start.elapsed().as_secs()
+        start.elapsed().as_millis()
     }
 
     fn arc_from_name(&self, var: &Var) -> (usize, usize) {

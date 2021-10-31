@@ -58,7 +58,7 @@ fn global_opti_exp(hmm: &HMM, sequence: &mut SuperSequence, constraints: &mut Co
 fn dp(hmm: &HMM, sequence: &SuperSequence, tags: &Array1<Array1<usize>>) {
     let start = Instant::now();
     let predictions = dp_solving(hmm, sequence);
-    let elapsed = start.elapsed().as_secs();
+    let elapsed = start.elapsed().as_millis();
     let solution = sequence.parse_solution(&predictions);
     let error_rate = error_rate(&solution, tags);
     println!("Error rate is {:5} in {} secs", error_rate, elapsed);

@@ -128,10 +128,7 @@ fn main() {
     let tags = config.get_tags();
     let mut hmm = HMM::new(&sequences, &tags, config.nstates, config.nobs);
     let mut constraints = config.get_constraints();
-
-    if !exp {
-        constraints.keep_prop(config.get_prop());
-    }
+    constraints.keep_prop(config.get_prop());
 
     let mut super_seq = SuperSequence::from(&sequences, &constraints, &hmm);
 

@@ -78,9 +78,6 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
 
 
     for idx in 0..sequence.len() {
-        if idx % 1000 == 0 {
-            println!("{}/{} {} nodes in the cstr_tree", idx, sequence.len(), arena.count());
-        }
         let element = &sequence[idx];
         // Check if the layer is constrained?
         let is_constrained = element.constraint_component != -1;

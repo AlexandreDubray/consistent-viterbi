@@ -65,9 +65,6 @@ impl<'b> GlobalOpti<'b> {
 
 
         for idx in 0..self.sequence.len() {
-            if idx % 10000 == 0 {
-                println!("{}/{}", idx, self.sequence.len());
-            }
             let element = &self.sequence[idx];
             let is_constrained = element.constraint_component != -1;
             if idx != self.sequence.len() - 1 {

@@ -35,6 +35,7 @@ impl MetaElements {
 pub struct SuperSequence {
     elements: Vec<MetaElements>,
     pub nb_cstr: usize,
+    pub first_pos_cstr: Array1<usize>,
     seq_sizes: Vec<usize>
 }
 
@@ -60,21 +61,29 @@ impl SuperSequence {
 
     pub fn from(sequences: &Array1<Array1<usize>>, constraints: &Constraints, hmm: &HMM) -> Self {
         let size: usize = (0..sequences.len()).map(|x| sequences[x].len()).sum();
-        let ordering = SuperSequence::get_sequences_ordering(hmm, sequences);
+        let nb_cstr = constraints.components.len();
+
+        let mut first_pos_cstr = Array1::from_elem(nb_cstr, 0);
+        let mut seen = Array1::from_elem(nb_cstr, false);
+
         let seq_sizes: Vec<usize> = (0..sequences.len()).map(|i| sequences[i].len()).collect();
         let mut elements: Vec<MetaElements> = Vec::with_capacity(size);
+
+        let ordering = SuperSequence::get_sequences_ordering(hmm, sequences);
         for seq_id in ordering {
             let sequence = &sequences[seq_id];
             for t in 0..sequence.len() {
                 let comp_id = constraints.get_comp_id(seq_id, t);
-                //assert!(comp_id != -1);
+                if comp_id != -1 && !seen[comp_id as usize] {
+                    seen[comp_id as usize] = true;
+                    first_pos_cstr[comp_id as usize] = elements.len();
+                }
                 let element = MetaElements::new(seq_id, t, sequence[t], comp_id, false);
                 elements.push(element);
             }
         }
 
-        let nb_cstr = constraints.components.len();
-        let mut seen = Array1::from_elem(nb_cstr, false);
+        seen.fill(false);
         let count = 0;
         for i in (0..size).rev() {
             if count == nb_cstr {
@@ -90,14 +99,24 @@ impl SuperSequence {
             }
         }
 
-        Self { elements , nb_cstr: constraints.components.len(), seq_sizes}
+        Self { elements , nb_cstr: constraints.components.len(), first_pos_cstr, seq_sizes}
     }
 
     pub fn recompute_constraints(&mut self, constraints: &Constraints) {
-        for element in &mut self.elements {
-            element.constraint_component = constraints.get_comp_id(element.seq, element.t);
-        }
         self.nb_cstr = constraints.components.len();
+        let mut first_pos_cstr = Array1::from_elem(self.nb_cstr, 0);
+        let mut seen = Array1::from_elem(self.nb_cstr, false);
+        for t in 0..self.elements.len() {
+            let element = &mut self.elements[t];
+            element.constraint_component = constraints.get_comp_id(element.seq, element.t);
+            if element.constraint_component != -1 {
+                let ucomp = element.constraint_component as usize;
+                if !seen[ucomp] {
+                    seen[ucomp] = true;
+                    first_pos_cstr[ucomp] = t;
+                }
+            }
+        }
     }
 
     pub fn len(&self) -> usize {

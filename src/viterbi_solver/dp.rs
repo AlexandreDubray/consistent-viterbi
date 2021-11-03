@@ -35,43 +35,32 @@ impl DPEntry {
     }
 }
 
-fn get_child(arena: &mut Arena<Array1<i32>>, node_idx: NodeId, comp_choice: usize, state_choice: usize) -> NodeId {
-    let node = &arena[node_idx];
+fn get_choice(arena: &mut Arena<(i32, i32)>, node_idx: NodeId, comp_choice: usize) -> Result<usize, String> {
 
-    if node.get()[comp_choice] != -1 {
-        return node_idx;
-    }
+    let mut iter = node_idx.ancestors(arena);
+    let mut current = iter.next();
 
-    let has_children = node.first_child().is_none();
-
-    if has_children {
-        let mut current_child = node.first_child();
-        while !current_child.is_none() {
-            let current_id = current_child.unwrap();
-            let child = &arena[current_id];
-            if child.get()[comp_choice] == state_choice as i32 {
-                return current_id;
-            }
-            current_child = child.next_sibling();
+    while !current.is_none() {
+        let (comp, choice) = &arena[current.unwrap()].get();
+        let ucomp = *comp as usize;
+        let uchoice = *choice as usize;
+        if ucomp == comp_choice {
+            return Ok(uchoice);
         }
+        current = iter.next();
     }
-    let mut new_choices = node.get().clone();
-    assert!(new_choices[comp_choice] == -1);
-    new_choices[comp_choice] = state_choice as i32;
-    let new_id = arena.new_node(new_choices);
-    node_idx.append(new_id, arena);
-    new_id
+    Err(format!("Did not find choice for constraint {} in tree", comp_choice))
 }
 
 pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
     let mut table: HashMap<(i32, usize), DPEntry> = HashMap::with_capacity(sequence.len()*hmm.nstates()/10);
 
     let arena = &mut Arena::new();
-    let root = arena.new_node(Array1::from_elem(sequence.nb_cstr, -1));
+    let root = arena.new_node((-1, -1));
 
     let mut dp_entry_source = DPEntry::new(0, 0);
     dp_entry_source.update(0.0, None, root);
-    table.insert((0, 0), dp_entry_source);
+    table.insert((-1, 0), dp_entry_source);
 
     let mut finished_constraints: Vec<bool> = (0..sequence.nb_cstr).map(|_| false).collect();
     let mut valid_states: Vec<HashSet<usize>> = (0..sequence.nb_cstr).map(|_| (0..hmm.nstates()).collect()).collect();
@@ -110,11 +99,16 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
                         } else {
                             let ucomp = element.constraint_component as usize;
                             for (cstr_node_id, value) in &entry.cstr_paths {
-                                let node_id = get_child(arena, *cstr_node_id, ucomp, state_to);
-                                let node = &arena[node_id];
-                                if node.get()[ucomp] == state_to as i32 {
+                                let mut leaf = *cstr_node_id;
+                                if idx == sequence.first_pos_cstr[ucomp] {
+                                    let newnode = arena.new_node((element.constraint_component, state_to as i32));
+                                    cstr_node_id.append(newnode, arena);
+                                    leaf = newnode;
+                                }
+                                let choice = get_choice(arena, leaf, ucomp).unwrap();
+                                if choice == state_to {
                                     let cost = value.0 + arc_cost;
-                                    dp_entry.update(cost, Some((entry.time, entry.state, *cstr_node_id)), node_id);
+                                    dp_entry.update(cost, Some((entry.time, entry.state, *cstr_node_id)), leaf);
                                 }
                             }
                         }
@@ -146,13 +140,15 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
                     for j in i+1..cstr_node_ids.len() {
                         let n1 = cstr_node_ids[i];
                         let n2 = cstr_node_ids[j];
-                        let d1 = arena.get(*n1).unwrap().get();
-                        let d2 = arena.get(*n2).unwrap().get();
                         let mut same = true;
-                        for k in 0..d1.len() {
-                            if !finished_constraints[k] && d1[k] != d2[k] {
-                                same = false;
-                                break;
+                        for k in 0..sequence.nb_cstr {
+                            if sequence.first_pos_cstr[k] <= idx {
+                                let c1 = get_choice(arena, *n1, k).unwrap();
+                                let c2 = get_choice(arena, *n2, k).unwrap();
+                                if !finished_constraints[k] && c1 != c2 {
+                                    same = false;
+                                    break;
+                                }
                             }
                         }
 

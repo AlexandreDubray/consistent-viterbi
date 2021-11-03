@@ -9,6 +9,7 @@ use rand::prelude::*;
 pub struct Constraints {
     pub components: Vec<Vec<(usize, usize)>>,
     pub last_elements: Vec<(usize, usize)>,
+    pub first_element_pos: Vec<usize>,
     full_components: Vec<Vec<(usize, usize)>>,
     map_elem_comp_id: HashMap<(usize, usize), usize>,
 }
@@ -52,7 +53,8 @@ impl Constraints {
         let components: Vec<Vec<(usize, usize)>> = Vec::new();
         let map_elem_comp_id: HashMap<(usize, usize), usize> = HashMap::new();
         let last_elements: Vec<(usize, usize)> = Vec::new();
-        Self {components, last_elements, full_components, map_elem_comp_id}
+        let first_element_pos: Vec<usize> = Vec::new();
+        Self {components, last_elements, first_element_pos, full_components, map_elem_comp_id}
     }
 
     pub fn keep_prop(&mut self, prop: f64) {
@@ -71,6 +73,7 @@ impl Constraints {
             }
             if current_comp.len() > 1 {
                 self.last_elements.push(*current_comp.last().unwrap());
+                self.first_element_pos.push(current_comp.first().unwrap().0);
                 self.components.push(current_comp);
                 current_comp = Vec::new();
             } else if current_comp.len() == 1 {

@@ -42,6 +42,8 @@ fn global_opti_exp(hmm: &HMM, sequence: &mut SuperSequence, constraints: &mut Co
     let nb_repeat = 10;
     let mut output = File::create(config.output_path()).unwrap();
     for i in 0..nb_repeat {
+        constraints.keep_prop(config.get_prop());
+        sequence.recompute_constraints(constraints);
         let mut model = GlobalOpti::new(hmm, sequence);
         model.build_model();
         println!("config {:.2} {}/{}", config.get_prop(), i+1, nb_repeat);
@@ -51,7 +53,6 @@ fn global_opti_exp(hmm: &HMM, sequence: &mut SuperSequence, constraints: &mut Co
         let error_rate = error_rate(&solution, tags);
         let s = format!("{:.5} {}\n", error_rate, runtime);
         output.write(s.as_bytes()).unwrap();
-        sequence.recompute_constraints(constraints);
     }
 }
 
@@ -70,6 +71,7 @@ fn dp_exp(hmm: &HMM, sequence: &mut SuperSequence, constraints: &mut Constraints
     for i in 0..nb_repeat {
         println!("config {:.2} {}/{}", config.get_prop(), i+1, nb_repeat);
         constraints.keep_prop(config.get_prop());
+        sequence.recompute_constraints(constraints);
         let start = Instant::now();
         let predictions = dp_solving(hmm, sequence);
         let runtime = start.elapsed().as_secs();
@@ -77,7 +79,6 @@ fn dp_exp(hmm: &HMM, sequence: &mut SuperSequence, constraints: &mut Constraints
         let error_rate = error_rate(&solution, tags);
         let s = format!("{:.5} {}\n", error_rate, runtime);
         output.write(s.as_bytes()).unwrap();
-        sequence.recompute_constraints(constraints);
     }
 }
 
@@ -128,6 +129,7 @@ fn main() {
     let tags = config.get_tags();
     let mut hmm = HMM::new(&sequences, &tags, config.nstates, config.nobs);
     let mut constraints = config.get_constraints();
+
     constraints.keep_prop(config.get_prop());
 
     let mut super_seq = SuperSequence::from(&sequences, &constraints, &hmm);

@@ -11,7 +11,7 @@ mod viterbi_solver;
 use viterbi_solver::hmm::HMM;
 use viterbi_solver::constraints::Constraints;
 use viterbi_solver::opti::GlobalOpti;
-use viterbi_solver::dp::dp_solving;
+use viterbi_solver::dp::{bender_decomposition, dp_solving};
 use viterbi_solver::utils::SuperSequence;
 
 
@@ -58,7 +58,9 @@ fn global_opti_exp(hmm: &HMM, sequence: &mut SuperSequence, constraints: &mut Co
 
 fn dp(hmm: &HMM, sequence: &SuperSequence, tags: &Array1<Array1<usize>>) {
     let start = Instant::now();
-    let predictions = dp_solving(hmm, sequence);
+    //let predictions = bender_decomposition(hmm, sequence);
+    let active_cstr = Array1::from_elem(sequence.nb_cstr, true);
+    let predictions = dp_solving(hmm, sequence, &active_cstr);
     let elapsed = start.elapsed().as_millis();
     let solution = sequence.parse_solution(&predictions);
     let error_rate = error_rate(&solution, tags);
@@ -73,7 +75,7 @@ fn dp_exp(hmm: &HMM, sequence: &mut SuperSequence, constraints: &mut Constraints
         constraints.keep_prop(config.get_prop());
         sequence.recompute_constraints(constraints);
         let start = Instant::now();
-        let predictions = dp_solving(hmm, sequence);
+        let predictions = bender_decomposition(hmm, sequence);
         let runtime = start.elapsed().as_secs();
         let solution = sequence.parse_solution(&predictions);
         let error_rate = error_rate(&solution, tags);

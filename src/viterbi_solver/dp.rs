@@ -1,5 +1,6 @@
-use ndarray::Array1;
+use ndarray::{Array1, Array2};
 use std::collections::{HashSet, HashMap};
+use std::rc::Rc;
 
 use indextree::Arena;
 use indextree::NodeId;
@@ -7,23 +8,24 @@ use indextree::NodeId;
 use super::hmm::HMM;
 use super::utils::SuperSequence;
 
-type Backtrack = (usize, usize, NodeId);
+type NodePtr = Rc<NodeId>;
+type Backtrack = (usize, usize, NodePtr);
 
 #[derive(Debug)]
 struct DPEntry {
     pub time: usize,
     pub state: usize,
-    pub cstr_paths: HashMap<NodeId, (f64, Option<Backtrack>)>,
+    pub cstr_paths: HashMap<NodePtr, (f64, Option<Backtrack>)>,
 }
 
 impl DPEntry {
 
     pub fn new(time: usize, state: usize) -> Self {
-        let cstr_paths: HashMap<NodeId, (f64, Option<Backtrack>)> = HashMap::new();
+        let cstr_paths: HashMap<NodePtr, (f64, Option<Backtrack>)> = HashMap::new();
         Self {time, state, cstr_paths}
     }
 
-    pub fn update(&mut self, cost: f64, from: Option<Backtrack>, cstr: NodeId) {
+    pub fn update(&mut self, cost: f64, from: Option<Backtrack>, cstr: NodePtr) {
         let entry = self.cstr_paths.entry(cstr).or_insert((f64::NEG_INFINITY, None));
         if cost > entry.0 {
             *entry = (cost, from);
@@ -35,7 +37,7 @@ impl DPEntry {
     }
 }
 
-fn get_choice(arena: &mut Arena<(i32, i32)>, node_idx: NodeId, comp_choice: usize) -> Result<usize, String> {
+fn get_choice(arena: &mut Arena<(i32, i32)>, node_idx: &NodePtr, comp_choice: usize) -> Result<usize, String> {
 
     let mut iter = node_idx.ancestors(arena);
     let mut current = iter.next();
@@ -52,11 +54,58 @@ fn get_choice(arena: &mut Arena<(i32, i32)>, node_idx: NodeId, comp_choice: usiz
     Err(format!("Did not find choice for constraint {} in tree", comp_choice))
 }
 
-pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
+pub fn bender_decomposition(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
+    let mut active_constraints = Array1::from_elem(sequence.nb_cstr, false);
+    let mut solution = Array1::from_elem(1, 0);
+    for i in 0..sequence.nb_cstr {
+        println!("Run {}/{} max", i, sequence.nb_cstr);
+        solution = dp_solving(hmm, sequence, &active_constraints);
+
+        let mut count = Array2::from_elem((sequence.nb_cstr, hmm.nstates()), 0);
+        let mut max_val = Array1::from_elem(sequence.nb_cstr, 0);
+        let mut sum = Array1::from_elem(sequence.nb_cstr, 0);
+
+        for t in 0..sequence.len() {
+            let comp_id = sequence[t].constraint_component;
+            if comp_id != -1 {
+                let ucomp = comp_id as usize;
+                let tag = solution[t];
+                count[[ucomp, tag]] += 1;
+                if count[[ucomp, tag]] > max_val[ucomp] {
+                    max_val[ucomp] = count[[ucomp, tag]];
+                }
+                sum[ucomp] += 1;
+            }
+        }
+        let mut optimum = true;
+        let mut next_added_cstr = 0;
+        let mut max_viol = 0;
+        let mut nb_violated = 0;
+        for comp_id in 0..sequence.nb_cstr {
+            if sum[comp_id] != max_val[comp_id] {
+                optimum = false;
+                nb_violated += 1;
+                let violations = sum[comp_id] - max_val[comp_id];
+                if violations > max_viol {
+                    next_added_cstr = comp_id;
+                    max_viol = violations;
+                }
+            }
+        }
+        if optimum {
+            break;
+        }
+        println!("Adding constraints {} to active constraints ({} constraints violated)", next_added_cstr, nb_violated);
+        active_constraints[next_added_cstr] = true;
+    }
+    solution
+}
+
+pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence, active_constraints: &Array1<bool>) -> Array1<usize> {
     let mut table: HashMap<(i32, usize), DPEntry> = HashMap::with_capacity(sequence.len()*hmm.nstates()/10);
 
     let arena = &mut Arena::new();
-    let root = arena.new_node((-1, -1));
+    let root = Rc::new(arena.new_node((-1, -1)));
 
     let mut dp_entry_source = DPEntry::new(0, 0);
     dp_entry_source.update(0.0, None, root);
@@ -69,7 +118,7 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
     for idx in 0..sequence.len() {
         let element = &sequence[idx];
         // Check if the layer is constrained?
-        let is_constrained = element.constraint_component != -1;
+        let is_constrained = element.constraint_component != -1 && active_constraints[element.constraint_component as usize];
 
         for state_to in 0..hmm.nstates() {
             if is_constrained && !valid_states[element.constraint_component as usize].contains(&state_to) {
@@ -94,21 +143,22 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
                         if !is_constrained {
                             for (cstr_node_id, value) in &entry.cstr_paths {
                                 let cost = value.0 + arc_cost;
-                                dp_entry.update(cost, Some((entry.time, entry.state, *cstr_node_id)), *cstr_node_id);
+                                dp_entry.update(cost, Some((entry.time, entry.state, Rc::clone(cstr_node_id))), Rc::clone(cstr_node_id));
                             }
                         } else {
                             let ucomp = element.constraint_component as usize;
                             for (cstr_node_id, value) in &entry.cstr_paths {
-                                let mut leaf = *cstr_node_id;
-                                if idx == sequence.first_pos_cstr[ucomp] {
+                                let leaf = if idx == sequence.first_pos_cstr[ucomp] {
                                     let newnode = arena.new_node((element.constraint_component, state_to as i32));
                                     cstr_node_id.append(newnode, arena);
-                                    leaf = newnode;
-                                }
-                                let choice = get_choice(arena, leaf, ucomp).unwrap();
+                                    Rc::new(newnode)
+                                } else {
+                                    Rc::clone(cstr_node_id)
+                                };
+                                let choice = get_choice(arena, &leaf, ucomp).unwrap();
                                 if choice == state_to {
                                     let cost = value.0 + arc_cost;
-                                    dp_entry.update(cost, Some((entry.time, entry.state, *cstr_node_id)), leaf);
+                                    dp_entry.update(cost, Some((entry.time, entry.state, Rc::clone(cstr_node_id))), Rc::clone(&leaf));
                                 }
                             }
                         }
@@ -135,7 +185,7 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
 
             if should_prune {
                 let mut to_remove: Vec<NodeId> = Vec::new();
-                let cstr_node_ids: Vec<&NodeId> = dp_entry.cstr_paths.keys().collect();
+                let cstr_node_ids: Vec<&NodePtr> = dp_entry.cstr_paths.keys().collect();
                 for i in 0..cstr_node_ids.len() {
                     for j in i+1..cstr_node_ids.len() {
                         let n1 = cstr_node_ids[i];
@@ -143,8 +193,8 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
                         let mut same = true;
                         for k in 0..sequence.nb_cstr {
                             if sequence.first_pos_cstr[k] <= idx {
-                                let c1 = get_choice(arena, *n1, k).unwrap();
-                                let c2 = get_choice(arena, *n2, k).unwrap();
+                                let c1 = get_choice(arena, n1, k).unwrap();
+                                let c2 = get_choice(arena, n2, k).unwrap();
                                 if !finished_constraints[k] && c1 != c2 {
                                     same = false;
                                     break;
@@ -157,9 +207,9 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
                             let v1 = dp_entry.cstr_paths.get(n1).unwrap().0;
                             let v2 = dp_entry.cstr_paths.get(n2).unwrap().0;
                             if v1 > v2 {
-                                to_remove.push(n2.to_owned());
+                                to_remove.push(*n2.to_owned());
                             } else {
-                                to_remove.push(n1.to_owned());
+                                to_remove.push(*n1.to_owned());
                             }
                         }
                     }
@@ -171,12 +221,14 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
 
             if dp_entry.len() > 0 {
                 table.insert((idx as i32, state_to), dp_entry);
+            } else if is_constrained {
+                valid_states[element.constraint_component as usize].remove(&state_to);
             }
         }
     }
 
     let mut dp_entry_target: Option<&DPEntry> = None;
-    let mut best_cstr_path: Option<NodeId> = None;
+    let mut best_cstr_path: Option<&NodePtr> = None;
     let mut best_cost = f64::NEG_INFINITY;
     for state in 0..hmm.nstates() {
         match table.get(&(sequence.len() as i32 - 1, state)) {
@@ -185,7 +237,7 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
                     if value.0 > best_cost {
                         best_cost = value.0;
                         dp_entry_target = Some(entry);
-                        best_cstr_path = Some(*cstr_path_idx);
+                        best_cstr_path = Some(cstr_path_idx);
                     }
                 }
             },
@@ -197,11 +249,11 @@ pub fn dp_solving(hmm: &HMM, sequence: &SuperSequence) -> Array1<usize> {
     let mut current  = dp_entry_target.unwrap();
     for idx in (0..sol.len()).rev() {
         sol[idx] = current.state;
-        let (_, from) = current.cstr_paths.get(&best_cstr_path.unwrap()).unwrap();
+        let (_, from) = current.cstr_paths.get(best_cstr_path.unwrap()).unwrap();
         if idx != 0 {
-            let from = from.unwrap();
+            let from = from.as_ref().unwrap();
             let key = (from.0 as i32, from.1);
-            best_cstr_path = Some(from.2);
+            best_cstr_path = Some(&from.2);
             current = table.get(&key).unwrap();
         }
     }

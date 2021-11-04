@@ -102,9 +102,13 @@ impl<'b> GlobalOpti<'b> {
                     match &inflow_cache[state] {
                         Some(inflow) => {
                             if is_constrained {
-                                let inflow_eq = cstr_inflow_cache[element.constraint_component as usize][state].as_ref().unwrap();
-                                let dflow = (*inflow_eq).clone() - (*inflow).clone();
-                                self.model.add_constr("", dflow, Equal, 0.0).unwrap();
+                                match &cstr_inflow_cache[element.constraint_component as usize][state] {
+                                    Some(inflow_eq) => {
+                                        let dflow = (*inflow_eq).clone() - (*inflow).clone();
+                                        self.model.add_constr("", dflow, Equal, 0.0).unwrap();
+                                    },
+                                    None => ()
+                                };
                             }
                             let arc = self.add_var(0.0, idx+1, state, 0);
                             target_flow += arc.clone();

@@ -2,6 +2,8 @@ use super::hmm::HMM;
 use super::constraints::Constraints;
 use ndarray::Array1;
 
+use std::collections::HashSet;
+
 use std::ops::Index;
 
 #[derive(Debug)]
@@ -10,13 +12,14 @@ pub struct MetaElements {
     pub t: usize,
     pub value: usize,
     pub constraint_component: i32,
-    pub last_of_constraint: bool
+    pub last_of_constraint: bool,
+    pub previous_idx_cstr: Option<usize>
 }
 
 impl MetaElements {
 
-    pub fn new(seq: usize, t: usize, value: usize, constraint_component: i32, last_of_constraint: bool) -> Self {
-        Self { seq, t, value, constraint_component, last_of_constraint}
+    pub fn new(seq: usize, t: usize, value: usize, constraint_component: i32, last_of_constraint: bool, previous_idx_cstr: Option<usize>) -> Self {
+        Self { seq, t, value, constraint_component, last_of_constraint, previous_idx_cstr}
     }
 
     pub fn arc_p(&self, hmm: &HMM, state_from: usize, state: usize) -> f64 {
@@ -35,8 +38,12 @@ impl MetaElements {
 pub struct SuperSequence {
     elements: Vec<MetaElements>,
     pub nb_cstr: usize,
+    pub nb_seqs: usize,
     pub first_pos_cstr: Array1<usize>,
-    seq_sizes: Vec<usize>
+    pub seq_sizes: Array1<usize>,
+    pub seq_starts: Array1<usize>,
+    pub seq_per_cstr: Array1<HashSet<usize>>,
+    orig_seq_sizes: Array1<usize>
 }
 
 impl SuperSequence {
@@ -62,25 +69,45 @@ impl SuperSequence {
     pub fn from(sequences: &Array1<Array1<usize>>, constraints: &Constraints, hmm: &HMM) -> Self {
         let size: usize = (0..sequences.len()).map(|x| sequences[x].len()).sum();
         let nb_cstr = constraints.components.len();
+        let nb_seqs = sequences.len();
 
         let mut first_pos_cstr = Array1::from_elem(nb_cstr, 0);
         let mut seen = Array1::from_elem(nb_cstr, false);
 
-        let seq_sizes: Vec<usize> = (0..sequences.len()).map(|i| sequences[i].len()).collect();
         let mut elements: Vec<MetaElements> = Vec::with_capacity(size);
 
         let ordering = SuperSequence::get_sequences_ordering(hmm, sequences);
+        let mut seq_starts = Array1::from_elem(sequences.len(), 0);
+        let mut seq_sizes = Array1::from_elem(sequences.len(), 0);
+
+        let mut seq_per_cstr: Array1<HashSet<usize>> = Array1::from_elem(nb_cstr, HashSet::new());
+
+        let mut last_seen_cstr: Array1<Option<usize>> = Array1::from_elem(nb_cstr, None);
+        let mut idx = 0;
         for seq_id in ordering {
             let sequence = &sequences[seq_id];
+            seq_starts[idx] = elements.len();
+            seq_sizes[idx] = sequence.len();
             for t in 0..sequence.len() {
                 let comp_id = constraints.get_comp_id(seq_id, t);
                 if comp_id != -1 && !seen[comp_id as usize] {
                     seen[comp_id as usize] = true;
                     first_pos_cstr[comp_id as usize] = elements.len();
                 }
-                let element = MetaElements::new(seq_id, t, sequence[t], comp_id, false);
+                if comp_id != -1 {
+                    seq_per_cstr[comp_id as usize].insert(idx);
+                }
+                let previous_idx_cstr = if comp_id == -1 {
+                    None
+                } else {
+                    let ret = last_seen_cstr[comp_id as usize];
+                    last_seen_cstr[comp_id as usize] = Some(idx);
+                    ret
+                };
+                let element = MetaElements::new(seq_id, t, sequence[t], comp_id, false, previous_idx_cstr);
                 elements.push(element);
             }
+            idx += 1;
         }
 
         seen.fill(false);
@@ -99,14 +126,18 @@ impl SuperSequence {
             }
         }
 
-        Self { elements , nb_cstr: constraints.components.len(), first_pos_cstr, seq_sizes}
+        let orig_seq_sizes = (0..sequences.len()).map(|seq_id| sequences[seq_id].len()).collect();
+        Self { elements , nb_cstr: constraints.components.len(), nb_seqs, first_pos_cstr, seq_sizes, seq_starts, seq_per_cstr, orig_seq_sizes}
     }
 
     pub fn recompute_constraints(&mut self, constraints: &Constraints) {
         self.nb_cstr = constraints.components.len();
         let mut first_pos_cstr = Array1::from_elem(self.nb_cstr, 0);
         let mut seen = Array1::from_elem(self.nb_cstr, false);
-        for t in 0..self.elements.len() {
+        let mut seq_per_cstr: Array1<HashSet<usize>> = Array1::from_elem(self.nb_cstr, HashSet::new());
+        let mut idx = 0;
+        let T = self.elements.len();
+        for t in 0..T {
             let element = &mut self.elements[t];
             element.constraint_component = constraints.get_comp_id(element.seq, element.t);
             if element.constraint_component != -1 {
@@ -115,8 +146,14 @@ impl SuperSequence {
                     seen[ucomp] = true;
                     first_pos_cstr[ucomp] = t;
                 }
+                seq_per_cstr[ucomp].insert(idx);
+            }
+            if t < T-1 && element.seq != self.elements[t+1].seq {
+                idx += 1;
             }
         }
+        self.first_pos_cstr = first_pos_cstr;
+        self.seq_per_cstr = seq_per_cstr;
     }
 
     pub fn len(&self) -> usize {
@@ -124,7 +161,7 @@ impl SuperSequence {
     }
 
     pub fn parse_solution(&self, solution: &Array1<usize>) -> Array1<Array1<usize>> {
-        let mut sol = Array1::from_iter((0..self.seq_sizes.len()).map(|i| Array1::from_elem(self.seq_sizes[i], 0)));
+        let mut sol = Array1::from_iter((0..self.seq_sizes.len()).map(|i| Array1::from_elem(self.orig_seq_sizes[i], 0)));
         for i in 0..self.elements.len() {
             let el = &self.elements[i];
             sol[el.seq][el.t] = solution[i];

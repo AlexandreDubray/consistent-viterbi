@@ -59,8 +59,7 @@ fn global_opti_exp(hmm: &HMM, sequence: &mut SuperSequence, constraints: &mut Co
 fn dp(hmm: &HMM, sequence: &SuperSequence, tags: &Array1<Array1<usize>>) {
     let start = Instant::now();
     let mut solver = DPSolver::new(hmm, sequence);
-    let active_cstr = Array1::from_elem(sequence.nb_cstr, true);
-    solver.dp_solving(&active_cstr);
+    solver.dp_solving();
     let elapsed = start.elapsed().as_millis();
     let solution = sequence.parse_solution(&solver.solution);
     let error_rate = error_rate(&solution, tags);
@@ -76,7 +75,7 @@ fn dp_exp(hmm: &HMM, sequence: &mut SuperSequence, constraints: &mut Constraints
         sequence.recompute_constraints(constraints);
         let mut solver = DPSolver::new(hmm, sequence);
         let start = Instant::now();
-        solver.bender_decomposition();
+        solver.dp_solving();
         let runtime = start.elapsed().as_secs();
         let solution = sequence.parse_solution(&solver.solution);
         let error_rate = error_rate(&solution, tags);

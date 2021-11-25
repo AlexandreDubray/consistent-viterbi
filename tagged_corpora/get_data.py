@@ -1,9 +1,18 @@
-from nltk.corpus import masc_tagged, brown, treebank, mac_morpho
+from nltk.corpus import masc_tagged, brown, treebank, mac_morpho, conll2000
 import os
 import pickle
 import nltk
 
-nltk.download(["masc_tagged", "brown", "treebank", "mac_morpho"])
+datasets = ["masc_tagged", "brown", "treebank", "mac_morpho", "conll2000"]
+nltk.download(datasets)
+
+d = [
+    (masc_tagged, 'masc'),
+    (brown, 'brown'),
+    (treebank, 'treebank'),
+    (mac_morpho, 'mac_morpho'),
+    (conll2000, 'conll2000')
+]
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -31,8 +40,10 @@ def process_corpus(corpus, name):
     map_pos_int_r = {}
     next_pid = 0
 
+    consistency_constraints = []
+
     print('mapping sentences')
-    for sentence in sentences:
+    for seq_id, sentence in enumerate(sentences):
         for i, (word, pos) in enumerate(sentence):
             if word not in map_word_int:
                 map_word_int[word] = next_wid
@@ -42,37 +53,13 @@ def process_corpus(corpus, name):
                 map_pos_int[pos] = next_pid
                 map_pos_int_r[next_pid] = pos
                 next_pid += 1
-            sentence[i] = (map_word_int[word], map_pos_int[pos])
-    pi = [0 for _ in range(next_pid)]
-    A = [[0 for _ in range(next_pid)] for _ in range(next_pid)]
-    b = [[0 for _ in range(next_wid)] for _ in range(next_pid)]
-    seen_states = [0 for _ in range(next_pid)]
-
-    consistency_constraints = [set() for _ in range(next_pid)]
-
-    print('computing HMM structure')
-    for sid, sentence in enumerate(sentences):
-        pi[sentence[0][1]] += 1
-        for i in range(len(sentence)):
-            (word_i, pos_i) = sentence[i]
-            consistency_constraints[pos_i].add((sid, i))
-            if i < len(sentence) - 1:
-                (_, pos_j) = sentence[i+1]
-                A[pos_i][pos_j] += 1
-
-            b[pos_i][word_i] += 1
-            seen_states[pos_i] += 1
-
-    pi = [x/len(sentences) for x in pi]
-    A = [[x/seen_states[i] for x in row] for i, row in enumerate(A)]
-    b = [[x/seen_states[i] for x in row] for i, row in enumerate(b)]
+                consistency_constraints.append(set())
+            pid = map_pos_int[pos]
+            wid = map_word_int[word]
+            consistency_constraints[pid].add((seq_id, i))
+            sentence[i] = (wid, pid)
 
     safe_mkdir(os.path.join(script_dir, name))
-
-    print('Dumping HMM structure...')
-    dump_matrix(os.path.join(script_dir, name, 'A'), A)
-    dump_matrix(os.path.join(script_dir, name, 'b'), b)
-    dump_vector(os.path.join(script_dir, name, 'pi'), pi)
 
     print('Dumping sentences and tags')
     fsent = open(os.path.join(script_dir, name, 'sequences'), 'w')
@@ -93,7 +80,8 @@ def process_corpus(corpus, name):
         pickle.dump(map_pos_int_r, f)
 
     print("Generating configs")
-    for method in ['viterbi', 'global_opti', 'dp']:
+    #for method in ['viterbi', 'global_opti', 'dp']:
+    for method in ['ilp']:
         output_path = os.path.join(script_dir, name, f'output_{method}')
         config_path = os.path.join(script_dir, name, f'configs_{method}')
         safe_mkdir(output_path)
@@ -102,19 +90,13 @@ def process_corpus(corpus, name):
             prop = round(prop_int / 100, 2)
             with open(os.path.join(config_path, f'config_{prop}'), 'w') as f:
                 f.write(f'method={method}\n')
-                f.write(f'hmm_path={os.path.join(script_dir, name)}\n')
                 f.write(f'input_path={os.path.join(script_dir, name)}\n')
                 f.write(f'output_path={output_path}\n')
-                f.write(f'nstates={len(A)}\n')
-                f.write(f'nobs={len(b[0])}\n')
+                f.write(f'nstates={next_pid}\n')
+                f.write(f'nobs={next_wid}\n')
                 f.write(f'prop={prop}\n')
 
 
-print('masc...')
-process_corpus(masc_tagged, 'masc')
-print('brown...')
-process_corpus(brown, 'brown')
-print('treebank...')
-process_corpus(treebank, 'treebank')
-print('mac_morpho...')
-process_corpus(mac_morpho, 'mac_morpho')
+for dataset, name in d:
+    print(f"{name}...")
+    process_corpus(dataset, name)

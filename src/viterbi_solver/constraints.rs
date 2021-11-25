@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::fs::File;
 use std::collections::HashMap;
+use ndarray::Array1;
 
 use rand::prelude::*;
 
@@ -50,6 +51,23 @@ impl Constraints {
         if component.len() > 1 {
             full_components.push(component);
         }
+        let components: Vec<Vec<(usize, usize)>> = Vec::new();
+        let map_elem_comp_id: HashMap<(usize, usize), usize> = HashMap::new();
+        let last_elements: Vec<(usize, usize)> = Vec::new();
+        let first_element_pos: Vec<usize> = Vec::new();
+        Self {components, last_elements, first_element_pos, full_components, map_elem_comp_id}
+    }
+
+    pub fn from_truth(truth: &Array1<Array1<usize>>, ncomponents: usize) -> Self {
+        let mut full_components: Vec<Vec<(usize, usize)>> = (0..ncomponents).map(|_| Vec::new()).collect();
+        for seq_id in 0..truth.len() {
+            let tags = &truth[seq_id];
+            for t in 0..tags.len() {
+                let tag = tags[t];
+                full_components[tag].push((seq_id, t));
+            }
+        }
+
         let components: Vec<Vec<(usize, usize)>> = Vec::new();
         let map_elem_comp_id: HashMap<(usize, usize), usize> = HashMap::new();
         let last_elements: Vec<(usize, usize)> = Vec::new();

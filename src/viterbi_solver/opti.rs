@@ -2,12 +2,12 @@ use gurobi::*;
 use ndarray::Array1;
 use std::time::Instant;
 
-use super::hmm::HMM;
+use super::super::hmm::hmm::HMM;
 use super::utils::SuperSequence;
 
 pub struct GlobalOpti<'a> {
     hmm: &'a HMM,
-    sequence: &'a SuperSequence,
+    sequence: &'a SuperSequence<'a>,
     model: Model,
     solution: Array1<usize>,
 }
@@ -16,7 +16,7 @@ impl<'b> GlobalOpti<'b> {
 
     pub fn new(hmm: &'b HMM, sequence: &'b SuperSequence) -> Self {
         let mut env = Env::new("logfile.log").unwrap();
-        env.set(param::OutputFlag, 0).unwrap();
+        //env.set(param::OutputFlag, 0).unwrap();
         let model = Model::new("model", &env).unwrap();
         let solution = Array1::from_elem(sequence.len(), 0);
         Self {hmm, sequence, model, solution}
@@ -65,6 +65,9 @@ impl<'b> GlobalOpti<'b> {
 
 
         for idx in 0..self.sequence.len() {
+            if idx % 100 == 0 {
+                println!("{}/{}", idx+1, self.sequence.len());
+            }
             let element = &self.sequence[idx];
             let is_constrained = element.constraint_component != -1;
             if idx != self.sequence.len() - 1 {

@@ -2,7 +2,7 @@ use ndarray::Array1;
 use std::collections::{HashSet, HashMap};
 use std::rc::Rc;
 
-use super::hmm::HMM;
+use super::super::hmm::hmm::HMM;
 use super::utils::SuperSequence;
 
 type NodePtr = Rc<CstrNode>;
@@ -67,28 +67,87 @@ impl CstrNode {
 pub struct DPSolver<'a> {
     pub solution: Array1<usize>,
     hmm: &'a HMM,
-    sequence: &'a SuperSequence,
+    sequence: &'a mut SuperSequence<'a>,
     table: HashMap<(i32, usize), DPEntry>,
+    optimum: bool,
+    constraint_choices: Array1<i32>,
+    violated_constraints: Array1<bool>
 }
 
 impl<'b> DPSolver<'b> {
 
-    pub fn new(hmm: &'b HMM, sequence: &'b SuperSequence) -> Self {
+    pub fn new(hmm: &'b HMM, sequence: &'b mut SuperSequence<'b>) -> Self {
         let solution = Array1::from_elem(sequence.len(), 0);
         let table: HashMap<(i32, usize), DPEntry> = HashMap::new();
-        Self {solution, hmm, sequence, table}
+        let constraint_choices = Array1::from_elem(sequence.nb_cstr, -1);
+        let violated_constraints = Array1::from_elem(sequence.nb_cstr, false);
+        Self {solution, hmm, sequence, table, optimum: false, constraint_choices, violated_constraints}
     }
 
-    fn clear_table(&mut self, idx: usize, state: usize) {
-        let mut current = Some(idx);
-        while current.is_some() {
-            self.table.remove(&(current.unwrap() as i32, state));
-            current = self.sequence[current.unwrap()].previous_idx_cstr;
+    fn prune(&self, idx: usize, dp_entry: &mut DPEntry, finished_constraints: &Vec<bool>) {
+        let mut to_remove: Vec<Rc<CstrNode>> = Vec::new();
+        let cstr_node_ids: Vec<&NodePtr> = dp_entry.cstr_paths.keys().collect();
+        for i in 0..cstr_node_ids.len() {
+            if !self.sequence.active_constraints[i] { continue; }
+            for j in i+1..cstr_node_ids.len() {
+                if !self.sequence.active_constraints[j] { continue; }
+                let n1 = cstr_node_ids[i];
+                let n2 = cstr_node_ids[j];
+                let mut same = true;
+                for k in 0..self.sequence.nb_cstr {
+                    if self.sequence.first_pos_cstr[k] <= idx {
+                        let c1 = n1.get_choice(k).unwrap();
+                        let c2 = n2.get_choice(k).unwrap();
+                        if !finished_constraints[k] && c1 != c2 {
+                            same = false;
+                            break;
+                        }
+                    }
+                }
+
+                // Only keep the best one
+                if same {
+                    let v1 = dp_entry.cstr_paths.get(n1).unwrap().0;
+                    let v2 = dp_entry.cstr_paths.get(n2).unwrap().0;
+                    if v1 > v2 {
+                        to_remove.push(Rc::clone(n2));
+                    } else {
+                        to_remove.push(Rc::clone(n1));
+                    }
+                }
+            }
+        }
+        for tr in to_remove {
+            dp_entry.cstr_paths.remove(&tr);
+        }
+    }
+
+    pub fn iterative_solving(&mut self) {
+        self.sequence.deactive_constraints();
+        let mut count = 0;
+        while !self.optimum {
+            println!("Run {}", count+1);
+            self.sequence.reorder();
+            self.optimum = true;
+            self.dp_solving();
+            println!("Optimum? {}", self.optimum);
+            if !self.optimum {
+                // Find the next cstr to add
+                for comp_id in 0..self.sequence.nb_cstr {
+                    if self.violated_constraints[comp_id] && !self.sequence.active_constraints[comp_id] {
+                        println!("Activate constraint {}", comp_id);
+                        self.sequence.activate_constraint(comp_id);
+                    }
+                }
+
+            }
+            count += 1;
         }
     }
 
     pub fn dp_solving(&mut self) {
         let root = Rc::new(CstrNode::new(self.sequence.nb_cstr, 0, None));
+        self.table.clear();
 
         let mut dp_entry_source = DPEntry::new(0, 0);
         dp_entry_source.update(0.0, None, root);
@@ -98,12 +157,12 @@ impl<'b> DPSolver<'b> {
         let mut valid_states: Vec<HashSet<usize>> = (0..self.sequence.nb_cstr).map(|_| (0..self.hmm.nstates()).collect()).collect();
 
         for idx in 0.. self.sequence.len() {
-            if idx % 1000 == 0 {
+            if idx % 10000 == 0 {
                 println!("{}/{}", idx, self.sequence.len());
             }
             let element = &self.sequence[idx];
             // Check if the layer is constrained?
-            let is_constrained = element.constraint_component != -1;
+            let is_constrained = self.sequence.is_constrained(idx);
 
             for state_to in 0..self.hmm.nstates() {
                 if is_constrained && !valid_states[element.constraint_component as usize].contains(&state_to) {
@@ -115,7 +174,6 @@ impl<'b> DPSolver<'b> {
                 if !element.can_be_emited(self.hmm, state_to) {
                     if is_constrained {
                         valid_states[element.constraint_component as usize].remove(&state_to);
-                        self.clear_table(idx, state_to);
                     }
                     continue;
                 }
@@ -168,50 +226,20 @@ impl<'b> DPSolver<'b> {
                 }
 
                 if should_prune {
-                    let mut to_remove: Vec<Rc<CstrNode>> = Vec::new();
-                    let cstr_node_ids: Vec<&NodePtr> = dp_entry.cstr_paths.keys().collect();
-                    for i in 0..cstr_node_ids.len() {
-                        for j in i+1..cstr_node_ids.len() {
-                            let n1 = cstr_node_ids[i];
-                            let n2 = cstr_node_ids[j];
-                            let mut same = true;
-                            for k in 0..self.sequence.nb_cstr {
-                                if self.sequence.first_pos_cstr[k] <= idx {
-                                    let c1 = n1.get_choice(k).unwrap();
-                                    let c2 = n2.get_choice(k).unwrap();
-                                    if !finished_constraints[k] && c1 != c2 {
-                                        same = false;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            // Only keep the best one
-                            if same {
-                                let v1 = dp_entry.cstr_paths.get(n1).unwrap().0;
-                                let v2 = dp_entry.cstr_paths.get(n2).unwrap().0;
-                                if v1 > v2 {
-                                    to_remove.push(Rc::clone(n2));
-                                } else {
-                                    to_remove.push(Rc::clone(n1));
-                                }
-                            }
-                        }
-                    }
-                    for tr in to_remove {
-                        dp_entry.cstr_paths.remove(&tr);
-                    }
+                    self.prune(idx, &mut dp_entry, &finished_constraints);
                 }
 
                 if dp_entry.len() > 0 {
                     self.table.insert((idx as i32, state_to), dp_entry);
                 } else if is_constrained {
                     valid_states[element.constraint_component as usize].remove(&state_to);
-                    self.clear_table(idx, state_to);
                 }
             }
         }
+        self.backtrack();
+    }
 
+    pub fn backtrack(&mut self) {
         let mut dp_entry_target: Option<&DPEntry> = None;
         let mut best_cstr_path: Option<&NodePtr> = None;
         let mut best_cost = f64::NEG_INFINITY;
@@ -229,10 +257,21 @@ impl<'b> DPSolver<'b> {
                 None => ()
             };
         }
-        
+
+        self.violated_constraints.fill(false);
         let mut current  = dp_entry_target.unwrap();
         for idx in (0..self.solution.len()).rev() {
             self.solution[idx] = current.state;
+            if self.sequence[idx].constraint_component != -1 {
+                let element = &self.sequence[idx];
+                let ucomp = element.constraint_component as usize;
+                if self.constraint_choices[ucomp] == -1 {
+                    self.constraint_choices[ucomp] = current.state as i32;
+                } else if self.constraint_choices[ucomp] != current.state as i32 {
+                    self.optimum = false;
+                    self.violated_constraints[ucomp] = true;
+                }
+            }
             let (_, from) = current.cstr_paths.get(best_cstr_path.unwrap()).unwrap();
             if idx != 0 {
                 let from = from.as_ref().unwrap();
@@ -241,5 +280,17 @@ impl<'b> DPSolver<'b> {
                 current = self.table.get(&key).unwrap();
             }
         }
+    }
+
+    pub fn parse_solution(&self) -> Array1<Array1<usize>> {
+        self.sequence.parse_solution(&self.solution)
+    }
+
+    pub fn refresh_constraints(&mut self, proportion: f64) {
+        self.sequence.recompute_constraints(proportion);
+    }
+
+    pub fn reorder(&mut self) {
+        self.sequence.reorder();
     }
 }

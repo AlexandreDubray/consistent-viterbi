@@ -22,7 +22,6 @@ pub fn load_sequences(path: &PathBuf) -> Array1<Array1<usize>> {
 
 pub struct Config {
     method: String,
-    hmm_path: PathBuf,
     input_path: PathBuf,
     output_path: PathBuf,
     pub nstates: usize,
@@ -34,14 +33,13 @@ impl Config {
 
     fn new() -> Self {
         let method = String::from("viterbi");
-        let hmm_path = PathBuf::from(".");
         let input_path = PathBuf::from(".");
         let output_path = PathBuf::from(".");
         let nstates = 0;
         let nobs = 0;
         let prop_constraints = 0.0;
 
-        Self {method, hmm_path, input_path, output_path, nstates, nobs, prop_constraints}
+        Self {method, input_path, output_path, nstates, nobs, prop_constraints}
     }
 
     pub fn from_config_file(filename: PathBuf) -> Self {
@@ -62,7 +60,6 @@ impl Config {
             let value = String::from(splits[1]);
             match option {
                 "method" => instance.method = value,
-                "hmm_path" => instance.hmm_path = PathBuf::from(value),
                 "input_path" => instance.input_path = PathBuf::from(value),
                 "output_path" => instance.output_path = PathBuf::from(value),
                 "nstates" => instance.nstates = value.parse().unwrap(),
@@ -71,7 +68,6 @@ impl Config {
                 _ => panic!("Unknown option in config file: {:?}", option)
             };
         }
-        instance.hmm_path.push("tmp");
         instance.input_path.push("tmp");
         instance.output_path.push(format!("{:.2}", instance.prop_constraints));
         instance
@@ -94,7 +90,7 @@ impl Config {
     }
 
     pub fn is_global_opti(&self) -> bool {
-        self.method == "global_opti"
+        self.method == "ilp"
     }
 
     pub fn is_viterbi(&self) -> bool {

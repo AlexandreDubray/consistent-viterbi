@@ -98,19 +98,6 @@ impl HMM {
         let mut gammas = Array2::from_elem((max_seq_size, nstates), 0.0);
         let mut xis = Array3::from_elem((max_seq_size, nstates, nstates), 0.0);
 
-        for seq_id in 0..sequences.len() {
-            for t in 0..sequences[seq_id].len() {
-                match tags[seq_id][t] {
-                    Some(state) => {
-                        alphas[[t, state]] = 1.0;
-                        betas[[t, state]] = 1.0;
-                        gammas[[t, state]] = 1.0;
-                    },
-                    None => ()
-                };
-            }
-        }
-
         for iter in 0..max_iter {
             println!("Iteration {}/{}", iter+1, max_iter);
             let start_it = Instant::now();
@@ -125,11 +112,26 @@ impl HMM {
                 let sequence = &sequences[seq_id];
                 for t in 0..sequence.len() {
                     let beta_index = sequence.len() - 1 - t;
-                    let update_t = tags[seq_id][t].is_none();
-                    let update_beta_t = tags[seq_id][beta_index].is_none();
-                    if !update_t && !update_beta_t {
-                        continue;
-                    }
+                    let update_t = match tags[seq_id][t] {
+                        Some(state) => {
+                            alphas.row_mut(t).fill(0.0);
+                            alphas[[t, state]] = 1.0;
+                            betas.row_mut(t).fill(0.0);
+                            betas[[t, state]] = 1.0;
+                            false
+                        },
+                        None => true
+                    };
+                    let update_beta_t = match tags[seq_id][beta_index] {
+                        Some(state) => {
+                            alphas.row_mut(beta_index).fill(0.0);
+                            alphas[[beta_index, state]] = 1.0;
+                            betas.row_mut(beta_index).fill(0.0);
+                            betas[[beta_index, state]] = 1.0;
+                            false
+                        },
+                        None => true
+                    };
                     if t == 0 {
                         if update_t {
                             let new_values = &pi*&b.column(sequence[t]);
@@ -246,9 +248,7 @@ impl HMM {
 
             
             let changes = delta_a + delta_b + delta_pi + delta_omega;
-            println!("Deltas: {:.2} {:.2} {:.2} {:.2}", delta_a, delta_b, delta_pi, delta_omega);
             println!("total changes: {:.2}", changes);
-
             let time_it = start_it.elapsed().as_secs();
             println!("Iteration in {} seconds", time_it);
             println!("<======================>");

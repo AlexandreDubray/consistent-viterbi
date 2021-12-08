@@ -2,7 +2,7 @@ use ndarray::{Array1, Array2};
 use super::super::hmm::hmm::HMM;
 use ndarray_stats::QuantileExt;
 
-pub fn decode(sequence: &Array1<usize>, hmm: &HMM) -> Array1<usize> {
+pub fn decode<const D: usize>(sequence: &Vec<[usize; D]>, hmm: &HMM<D>) -> Array1<usize> {
     let mut array = Array2::from_elem((sequence.len(), hmm.nstates()), 0.0);
     let mut bt = Array2::from_elem((sequence.len(), hmm.nstates()), 0);
 

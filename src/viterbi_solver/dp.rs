@@ -64,19 +64,19 @@ impl CstrNode {
     }
 }
 
-pub struct DPSolver<'a> {
+pub struct DPSolver<'a, const D: usize> {
     pub solution: Array1<usize>,
-    hmm: &'a HMM,
-    sequence: &'a mut SuperSequence<'a>,
+    hmm: &'a HMM<D>,
+    sequence: &'a mut SuperSequence<'a, D>,
     table: HashMap<(i32, usize), DPEntry>,
     optimum: bool,
     constraint_choices: Array1<i32>,
     violated_constraints: Array1<bool>
 }
 
-impl<'b> DPSolver<'b> {
+impl<'b, const D: usize> DPSolver<'b, D> {
 
-    pub fn new(hmm: &'b HMM, sequence: &'b mut SuperSequence<'b>) -> Self {
+    pub fn new(hmm: &'b HMM<D>, sequence: &'b mut SuperSequence<'b, D>) -> Self {
         let solution = Array1::from_elem(sequence.len(), 0);
         let table: HashMap<(i32, usize), DPEntry> = HashMap::new();
         let constraint_choices = Array1::from_elem(sequence.nb_cstr, -1);

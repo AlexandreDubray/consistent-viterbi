@@ -1,23 +1,35 @@
-use ndarray::Array1;
-
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 use super::viterbi_solver::constraints::Constraints;
 
-pub fn load_sequences(path: &PathBuf) -> Array1<Array1<usize>> {
+pub fn load_sequences<const D: usize>(path: &PathBuf) -> Vec<Vec<[usize; D]>> {
     let file = File::open(path).unwrap();
     let reader = BufReader::new(file);
 
-    let mut ret: Vec<Array1<usize>> = Vec::new();
+    let mut ret: Vec<Vec<[usize; D]>> = Vec::new();
+    let mut last_id: Option<usize> = None;
 
+    let mut cur_seq: Vec<[usize; D]> = Vec::new();
     for line in reader.lines() {
         let line = line.unwrap();
-        let sequence = line.split(" ").map(|x| x.parse::<usize>().unwrap()).collect();
-        ret.push(sequence)
+        let s: Vec<usize> = line.split(" ").map(|x| x.parse::<usize>().unwrap()).collect();
+        let tid = Some(s[0]);
+        if tid != last_id {
+            if last_id.is_some() {
+                ret.push(cur_seq);
+                cur_seq = Vec::new();
+            }
+        }
+        last_id = tid;
+        let mut element: [usize; D] = [0; D];
+        for i in 1..s.len() {
+            element[i-1] = s[i];
+        }
+        cur_seq.push(element);
     }
-    Array1::from_vec(ret)
+    ret
 }
 
 pub struct Config {
@@ -74,14 +86,34 @@ impl Config {
     }
 
 
-    pub fn get_sequences(&mut self) -> Array1<Array1<usize>> {
+    pub fn get_sequences<const D: usize>(&mut self) -> Vec<Vec<[usize; D]>> {
         self.input_path.set_file_name("sequences");
         load_sequences(&self.input_path)
     }
 
-    pub fn get_tags(&mut self) -> Array1<Array1<usize>> {
+    pub fn get_tags(&mut self) -> Vec<Vec<usize>> {
         self.input_path.set_file_name("tags");
-        load_sequences(&self.input_path)
+        let file = File::open(&self.input_path).unwrap();
+        let reader = BufReader::new(file);
+
+        let mut ret: Vec<Vec<usize>> = Vec::new();
+        let mut current: Vec<usize> = Vec::new();
+        let mut last_id: Option<usize> = None;
+
+        for line in reader.lines() {
+            let line = line.unwrap();
+            let s: Vec<usize> = line.split(" ").map(|x| x.parse::<usize>().unwrap()).collect();
+            let tid = Some(s[0]);
+            if tid != last_id {
+                if last_id.is_some() {
+                    ret.push(current);
+                    current = Vec::new();
+                }
+            }
+            current.push(s[1]);
+            last_id = tid;
+        }
+        ret
     }
 
     pub fn get_constraints(&mut self) -> Constraints {

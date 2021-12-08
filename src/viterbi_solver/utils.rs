@@ -1,30 +1,30 @@
 use super::super::hmm::hmm::HMM;
 use super::constraints::Constraints;
-use ndarray::Array1;
+use ndarray::prelude::*;
 
 use std::ops::Index;
 
 #[derive(Debug)]
-pub struct MetaElements {
+pub struct MetaElements<const D: usize> {
     pub seq: usize,
     pub t: usize,
-    pub value: usize,
+    pub value: [usize; D],
     pub constraint_component: i32,
     pub last_of_constraint: bool,
     pub previous_idx_cstr: Option<usize>
 }
 
-impl MetaElements {
+impl<const D: usize> MetaElements<D> {
 
-    pub fn new(seq: usize, t: usize, value: usize, constraint_component: i32, last_of_constraint: bool, previous_idx_cstr: Option<usize>) -> Self {
+    pub fn new(seq: usize, t: usize, value: [usize; D], constraint_component: i32, last_of_constraint: bool, previous_idx_cstr: Option<usize>) -> Self {
         Self { seq, t, value, constraint_component, last_of_constraint, previous_idx_cstr}
     }
 
     pub fn empty() -> Self {
-        Self { seq: 0, t: 0, value: 0, constraint_component: 0, last_of_constraint: false, previous_idx_cstr: None}
+        Self { seq: 0, t: 0, value: [0; D], constraint_component: 0, last_of_constraint: false, previous_idx_cstr: None}
     }
 
-    pub fn arc_p(&self, hmm: &HMM, state_from: usize, state: usize) -> f64 {
+    pub fn arc_p(&self, hmm: &HMM<D>, state_from: usize, state: usize) -> f64 {
         if self.t == 0 {
             hmm.init_prob(state, self.value)
         } else {
@@ -32,16 +32,16 @@ impl MetaElements {
         }
     }
 
-    pub fn can_be_emited(&self, hmm: &HMM, state: usize) -> bool {
+    pub fn can_be_emited(&self, hmm: &HMM<D>, state: usize) -> bool {
         hmm.emit_prob(state, self.value) > f64::NEG_INFINITY
     }
 }
 
-pub struct SuperSequence<'a> {
-    sequences: &'a Array1<Array1<usize>>,
-    hmm: &'a HMM,
+pub struct SuperSequence<'a, const D: usize> {
+    sequences: &'a Vec<Vec<[usize; D]>>,
+    hmm: &'a HMM<D>,
     constraints: &'a mut Constraints,
-    elements: Array1<MetaElements>,
+    elements: Array1<MetaElements<D>>,
     pub nb_cstr: usize,
     pub nb_seqs: usize,
     pub first_pos_cstr: Array1<usize>,
@@ -49,14 +49,14 @@ pub struct SuperSequence<'a> {
     pub active_constraints: Array1<bool>
 }
 
-impl<'b> SuperSequence<'b> {
+impl<'b, const D: usize> SuperSequence<'b, D> {
 
-    pub fn from(sequences: &'b Array1<Array1<usize>>, constraints: &'b mut Constraints, hmm: &'b HMM) -> Self {
+    pub fn from(sequences: &'b Vec<Vec<[usize; D]>>, constraints: &'b mut Constraints, hmm: &'b HMM<D>) -> Self {
         let size: usize = (0..sequences.len()).map(|x| sequences[x].len()).sum();
         let nb_cstr = constraints.components.len();
         let nb_seqs = sequences.len();
 
-        let elements: Array1<MetaElements> = (0..size).map(|_| MetaElements::empty()).collect();
+        let elements: Array1<MetaElements<D>> = (0..size).map(|_| MetaElements::empty()).collect();
         let first_pos_cstr = Array1::from_elem(1, 0);
 
         let orig_seq_sizes = (0..sequences.len()).map(|seq_id| sequences[seq_id].len()).collect();
@@ -187,8 +187,8 @@ impl<'b> SuperSequence<'b> {
     }
 }
 
-impl Index<usize> for SuperSequence<'_> {
-    type Output = MetaElements;
+impl<const D: usize> Index<usize> for SuperSequence<'_, D> {
+    type Output = MetaElements<D>;
 
     fn index(&self, idx: usize) -> &Self::Output {
         &self.elements[idx]

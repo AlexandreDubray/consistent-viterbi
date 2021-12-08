@@ -5,16 +5,16 @@ use std::time::Instant;
 use super::super::hmm::hmm::HMM;
 use super::utils::SuperSequence;
 
-pub struct GlobalOpti<'a> {
-    hmm: &'a HMM,
-    sequence: &'a SuperSequence<'a>,
+pub struct GlobalOpti<'a, const D: usize> {
+    hmm: &'a HMM<D>,
+    sequence: &'a SuperSequence<'a, D>,
     model: Model,
     solution: Array1<usize>,
 }
 
-impl<'b> GlobalOpti<'b> {
+impl<'b, const D: usize> GlobalOpti<'b, D> {
 
-    pub fn new(hmm: &'b HMM, sequence: &'b SuperSequence) -> Self {
+    pub fn new(hmm: &'b HMM<D>, sequence: &'b SuperSequence<D>) -> Self {
         let mut env = Env::new("logfile.log").unwrap();
         //env.set(param::OutputFlag, 0).unwrap();
         let model = Model::new("model", &env).unwrap();
@@ -65,7 +65,7 @@ impl<'b> GlobalOpti<'b> {
 
 
         for idx in 0..self.sequence.len() {
-            if idx % 100 == 0 {
+            if idx % 1000 == 0 {
                 println!("{}/{}", idx+1, self.sequence.len());
             }
             let element = &self.sequence[idx];

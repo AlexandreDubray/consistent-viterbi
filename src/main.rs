@@ -15,11 +15,11 @@ use hmm::hmm::HMM;
 use viterbi_solver::opti::GlobalOpti;
 use viterbi_solver::dp::DPSolver;
 use viterbi_solver::utils::SuperSequence;
-use viterbi_solver::constraints::Constraints;
 use viterbi_solver::viterbi::decode;
 
 
-fn viterbi(hmm: &HMM, sequences: &Array1<Array1<usize>>, tags: &Array1<Array1<usize>>) {
+/*
+fn viterbi<const D: usize>(hmm: &HMM<D>, sequences: &Vec<Vec<[usize; D]>>, tags: &Array1<Array1<usize>>) {
     let mut max_seq_size = 0;
     for sequence in sequences {
         max_seq_size = max_seq_size.max(sequence.len());
@@ -31,8 +31,9 @@ fn viterbi(hmm: &HMM, sequences: &Array1<Array1<usize>>, tags: &Array1<Array1<us
     let error_rate = error_rate(&predictions, tags);
     println!("Error rate {:.5} in {} sec", error_rate, elapsed);
 }
+*/
 
-fn global_opti(hmm: &HMM, sequence: &mut SuperSequence, tags: &Array1<Array1<usize>>) {
+fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, tags: &Vec<Vec<usize>>) {
     sequence.reorder();
     let mut model = GlobalOpti::new(hmm, sequence);
     model.build_model();
@@ -43,7 +44,7 @@ fn global_opti(hmm: &HMM, sequence: &mut SuperSequence, tags: &Array1<Array1<usi
     println!("Error rate is {:5} in {} secs", error_rate, time);
 }
 
-fn global_opti_exp(hmm: &HMM, sequence: &mut SuperSequence, tags: &Array1<Array1<usize>>, config: &utils::Config) {
+fn global_opti_exp<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, tags: &Vec<Vec<usize>>, config: &utils::Config) {
     let nb_repeat = 10;
     let mut output = File::create(config.output_path()).unwrap();
     for i in 0..nb_repeat {
@@ -60,7 +61,7 @@ fn global_opti_exp(hmm: &HMM, sequence: &mut SuperSequence, tags: &Array1<Array1
     }
 }
 
-fn dp<'a>(hmm: &'a HMM, sequence: &'a mut SuperSequence<'a>, tags: &Array1<Array1<usize>>) {
+fn dp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D>, tags: &Vec<Vec<usize>>) {
     let mut solver = DPSolver::new(hmm, sequence);
     solver.reorder();
     let start = Instant::now();
@@ -72,7 +73,7 @@ fn dp<'a>(hmm: &'a HMM, sequence: &'a mut SuperSequence<'a>, tags: &Array1<Array
     println!("Error rate is {:5} in {} secs", error_rate, elapsed);
 }
 
-fn dp_exp<'a>(hmm: &'a HMM, sequence: &'a mut SuperSequence<'a>, tags: &Array1<Array1<usize>>, config: &utils::Config) {
+fn dp_exp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D>, tags: &Vec<Vec<usize>>, config: &utils::Config) {
     let nb_repeat = 10;
     let mut output = File::create(config.output_path()).unwrap();
     let mut solver = DPSolver::new(hmm, sequence);
@@ -89,7 +90,7 @@ fn dp_exp<'a>(hmm: &'a HMM, sequence: &'a mut SuperSequence<'a>, tags: &Array1<A
     }
 }
 
-fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Array1<Array1<usize>>) -> f64 {
+fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Vec<Vec<usize>>) -> f64 {
     let mut errors = 0.0;
     let mut total = 0.0;
     let mut error_per_seq = 0.0;
@@ -141,13 +142,21 @@ fn main() {
 
     let exp = matches.occurrences_of("exp") == 1;
 
-    let sequences = config.get_sequences();
+    let sequences = config.get_sequences::<1>();
     let tags = config.get_tags();
 
-    let ts: Array1<Array1<Option<usize>>> = Array1::from_shape_fn(sequences.len(), |seq_id| Array1::from_shape_fn(sequences[seq_id].len(), |t| None));
-    //let ts: Array1<Array1<Option<usize>>> = Array1::from_shape_fn(sequences.len(), |seq_id| Array1::from_shape_fn(sequences[seq_id].len(), |t| Some(tags[seq_id][t])));
-    //let hmm = HMM::from_supervised(&sequences, &tags, config.nstates, config.nobs);
-    let hmm = HMM::from_semi_supervised(&sequences, &ts, config.nstates, config.nobs, 100, 0.01);
+    let mut info: Vec<Vec<Option<usize>>> = Vec::new();
+    for ts in &tags {
+        let mut c: Vec<Option<usize>> = Vec::new();
+        for t in ts {
+            c.push(Some(*t));
+        }
+        info.push(c);
+    }
+
+    let mut hmm = HMM::new(config.nstates, [config.nobs]);
+    //hmm.train_supervised(&sequences, &tags, config.nstates);
+    hmm.train_semi_supervised(&sequences, &info, config.nstates, 100, 0.01);
     
     let mut constraints = config.get_constraints();
 
@@ -170,6 +179,6 @@ fn main() {
             dp(&hmm, &mut super_seq, &tags);
         }
     } else if config.is_viterbi() {
-        viterbi(&hmm, &sequences, &tags);
+        //viterbi(&hmm, &sequences, &tags);
     }
 }

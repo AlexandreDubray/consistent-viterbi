@@ -58,13 +58,14 @@ impl Constraints {
         Self {components, last_elements, first_element_pos, full_components, map_elem_comp_id}
     }
 
-    pub fn from_truth(truth: &Array1<Array1<usize>>, ncomponents: usize) -> Self {
+    pub fn from_tags(truth: &Vec<Vec<Option<usize>>>, ncomponents: usize) -> Self {
         let mut full_components: Vec<Vec<(usize, usize)>> = (0..ncomponents).map(|_| Vec::new()).collect();
         for seq_id in 0..truth.len() {
             let tags = &truth[seq_id];
             for t in 0..tags.len() {
-                let tag = tags[t];
-                full_components[tag].push((seq_id, t));
+                if let Some(tag) = tags[t] {
+                    full_components[tag].push((seq_id, t));
+                }
             }
         }
 

@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-use super::viterbi_solver::constraints::Constraints;
+type TTAG = Option<usize>;
 
 pub fn load_sequences<const D: usize>(path: &PathBuf) -> Vec<Vec<[usize; D]>> {
     let file = File::open(path).unwrap();
@@ -32,113 +32,27 @@ pub fn load_sequences<const D: usize>(path: &PathBuf) -> Vec<Vec<[usize; D]>> {
     ret
 }
 
-pub struct Config {
-    method: String,
-    input_path: PathBuf,
-    output_path: PathBuf,
-    pub nstates: usize,
-    pub nobs: usize,
-    prop_constraints: f64
-}
+pub fn load_tags(path: &PathBuf) -> Vec<Vec<TTAG>> {
+    let file = File::open(path).unwrap();
+    let reader = BufReader::new(file);
 
-impl Config {
+    let mut ret: Vec<Vec<TTAG>> = Vec::new();
+    let mut current: Vec<TTAG> = Vec::new();
+    let mut last_id: Option<usize> = None;
 
-    fn new() -> Self {
-        let method = String::from("viterbi");
-        let input_path = PathBuf::from(".");
-        let output_path = PathBuf::from(".");
-        let nstates = 0;
-        let nobs = 0;
-        let prop_constraints = 0.0;
-
-        Self {method, input_path, output_path, nstates, nobs, prop_constraints}
-    }
-
-    pub fn from_config_file(filename: PathBuf) -> Self {
-        let mut instance = Config::new();
-        let file = match File::open(filename) {
-            Ok(f) => f,
-            Err(error) => panic!("Can not open file config file: {:?}", error)
-        };
-
-        let reader = BufReader::new(file);
-        for line in reader.lines() {
-            let line = line.unwrap();
-            let splits: Vec<&str> = line.split("=").collect();
-            if splits.len() != 2 {
-                panic!("Wrong line in config file");
+    for line in reader.lines() {
+        let line = line.unwrap();
+        let s: Vec<&str> = line.split(" ").collect();
+        let tid = Some(s[0].parse::<usize>().unwrap());
+        if tid != last_id {
+            if last_id.is_some() {
+                ret.push(current);
+                current = Vec::new();
             }
-            let option = splits[0];
-            let value = String::from(splits[1]);
-            match option {
-                "method" => instance.method = value,
-                "input_path" => instance.input_path = PathBuf::from(value),
-                "output_path" => instance.output_path = PathBuf::from(value),
-                "nstates" => instance.nstates = value.parse().unwrap(),
-                "nobs" => instance.nobs = value.parse().unwrap(),
-                "prop" => instance.prop_constraints = value.parse().unwrap(),
-                _ => panic!("Unknown option in config file: {:?}", option)
-            };
         }
-        instance.input_path.push("tmp");
-        instance.output_path.push(format!("{:.2}", instance.prop_constraints));
-        instance
+        let v: Option<usize> = if s[1] == "-1" { None } else { Some(s[1].parse::<usize>().unwrap()) };
+        current.push(v);
+        last_id = tid;
     }
-
-
-    pub fn get_sequences<const D: usize>(&mut self) -> Vec<Vec<[usize; D]>> {
-        self.input_path.set_file_name("sequences");
-        load_sequences(&self.input_path)
-    }
-
-    pub fn get_tags(&mut self) -> Vec<Vec<usize>> {
-        self.input_path.set_file_name("tags");
-        let file = File::open(&self.input_path).unwrap();
-        let reader = BufReader::new(file);
-
-        let mut ret: Vec<Vec<usize>> = Vec::new();
-        let mut current: Vec<usize> = Vec::new();
-        let mut last_id: Option<usize> = None;
-
-        for line in reader.lines() {
-            let line = line.unwrap();
-            let s: Vec<usize> = line.split(" ").map(|x| x.parse::<usize>().unwrap()).collect();
-            let tid = Some(s[0]);
-            if tid != last_id {
-                if last_id.is_some() {
-                    ret.push(current);
-                    current = Vec::new();
-                }
-            }
-            current.push(s[1]);
-            last_id = tid;
-        }
-        ret
-    }
-
-    pub fn get_constraints(&mut self) -> Constraints {
-        self.input_path.set_file_name("constraints");
-        Constraints::from_file(&self.input_path)
-    }
-
-    pub fn is_global_opti(&self) -> bool {
-        self.method == "ilp"
-    }
-
-    pub fn is_viterbi(&self) -> bool {
-        self.method == "viterbi"
-    }
-
-    pub fn is_dp(&self) -> bool {
-        self.method == "dp"
-    }
-
-    pub fn output_path(&self) -> &PathBuf {
-        &self.output_path
-    }
-
-    pub fn get_prop(&self) -> f64 {
-        self.prop_constraints
-    }
+    ret
 }
-

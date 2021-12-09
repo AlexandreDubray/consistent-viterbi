@@ -11,13 +11,25 @@ pub struct HMM<const D: usize> {
 impl<const D: usize> HMM<D> {
 
     pub fn new(nstates: usize, bdims: [usize; D]) -> Self {
-        let a = Array2::<f64>::zeros((nstates, nstates));
-        let b = Array1::from_shape_fn(nstates, |_| Array::<f64, _>::zeros(bdims.to_vec()));
-        let pi = Array1::<f64>::zeros(nstates);
+        let mut rng = thread_rng();
+        let mut a = Array2::from_shape_fn((nstates, nstates), |_| rng.gen::<f64>());
+        let mut b = Array1::from_shape_fn(nstates, |_| Array::from_shape_fn(&bdims[..], |_| rng.gen::<f64>()));
+        let mut pi = Array1::from_shape_fn(nstates, |_| rng.gen::<f64>());
+        for state in 0..nstates {
+            let mut ra = a.row_mut(state);
+            let s = ra.sum();
+            ra /= s;
+            let mb = &b[state];
+            let s = mb.sum();
+            b[state] = mb / s;
+        }
+        let s = pi.sum();
+        pi /= s;
         Self { a, b, pi }
     }
 
-    pub fn train_supervised(&mut self, sequences: &Vec<Vec<[usize; D]>>, tags: &Vec<Vec<usize>>, nstates: usize) {
+    pub fn train_supervised(&mut self, sequences: &Vec<Vec<[usize; D]>>, tags: &Vec<Vec<usize>>) {
+        let nstates = self.a.nrows();
         let mut seen_states = Array1::<f64>::zeros(nstates);
         let mut end_states = Array1::<f64>::zeros(nstates);
 
@@ -53,26 +65,14 @@ impl<const D: usize> HMM<D> {
         d.abs() <= 0.0001
     }
 
-    pub fn train_semi_supervised(&mut self, sequences: &Vec<Vec<[usize; D]>>, tags: &Vec<Vec<Option<usize>>>, nstates: usize, max_iter: usize, tol: f64) {
-        let mut rng = thread_rng();
+    pub fn train_semi_supervised(&mut self, sequences: &Vec<Vec<[usize; D]>>, tags: &Vec<Vec<Option<usize>>>, prior_transmat: Option<Array2<f64>>, max_iter: usize, tol: f64) {
+        let nstates = self.a.nrows();
 
-        self.a = Array2::from_shape_fn(self.a.raw_dim(), |_| rng.gen::<f64>());
-        self.pi = Array1::from_shape_fn(self.pi.raw_dim(), |_| rng.gen::<f64>());
-        self.b = Array1::from_shape_fn(nstates, |i| Array::from_shape_fn(self.b[i].raw_dim(), |_| rng.gen::<f64>()));
-
-        for state in 0..nstates {
-            let mut r = self.a.row_mut(state);
-            let s = r.sum();
-            r /= s;
-            let m = &self.b[state];
-            let s = m.sum();
-            self.b[state] = m / s;
-        }
+        match prior_transmat {
+            Some(mat) => self.a.assign(&mat),
+            None => ()
+        };
         let mut a_t = self.a.t();
-
-        let s = self.pi.sum();
-        self.pi /= s;
-        
 
         let mut pi_num = Array1::from_elem(nstates, 0.0);
         let mut omega_num = Array1::from_elem(nstates, 0.0);

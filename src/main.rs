@@ -4,6 +4,9 @@ use clap::{Arg, App};
 use std::time::Instant;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
+use rand::prelude::*;
+use ndarray::Array2;
 
 extern crate openblas_src;
 
@@ -16,6 +19,7 @@ use viterbi_solver::opti::GlobalOpti;
 use viterbi_solver::dp::DPSolver;
 use viterbi_solver::utils::SuperSequence;
 use viterbi_solver::viterbi::decode;
+use viterbi_solver::constraints::Constraints;
 
 
 /*
@@ -33,7 +37,7 @@ fn viterbi<const D: usize>(hmm: &HMM<D>, sequences: &Vec<Vec<[usize; D]>>, tags:
 }
 */
 
-fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, tags: &Vec<Vec<usize>>) {
+fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, tags: &Vec<Vec<Option<usize>>>) {
     sequence.reorder();
     let mut model = GlobalOpti::new(hmm, sequence);
     model.build_model();
@@ -44,24 +48,7 @@ fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, ta
     println!("Error rate is {:5} in {} secs", error_rate, time);
 }
 
-fn global_opti_exp<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, tags: &Vec<Vec<usize>>, config: &utils::Config) {
-    let nb_repeat = 10;
-    let mut output = File::create(config.output_path()).unwrap();
-    for i in 0..nb_repeat {
-        sequence.recompute_constraints(config.get_prop());
-        let mut model = GlobalOpti::new(hmm, sequence);
-        model.build_model();
-        println!("config {:.2} {}/{}", config.get_prop(), i+1, nb_repeat);
-        let runtime = model.solve();
-        let predictions = model.get_solutions();
-        let solution = sequence.parse_solution(predictions);
-        let error_rate = error_rate(&solution, tags);
-        let s = format!("{:.5} {}\n", error_rate, runtime);
-        output.write(s.as_bytes()).unwrap();
-    }
-}
-
-fn dp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D>, tags: &Vec<Vec<usize>>) {
+fn dp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D>, tags: &Vec<Vec<Option<usize>>>) {
     let mut solver = DPSolver::new(hmm, sequence);
     solver.reorder();
     let start = Instant::now();
@@ -73,24 +60,7 @@ fn dp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D
     println!("Error rate is {:5} in {} secs", error_rate, elapsed);
 }
 
-fn dp_exp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D>, tags: &Vec<Vec<usize>>, config: &utils::Config) {
-    let nb_repeat = 10;
-    let mut output = File::create(config.output_path()).unwrap();
-    let mut solver = DPSolver::new(hmm, sequence);
-    for i in 0..nb_repeat {
-        println!("config {:.2} {}/{}", config.get_prop(), i+1, nb_repeat);
-        solver.refresh_constraints(config.get_prop());
-        let start = Instant::now();
-        solver.dp_solving();
-        let runtime = start.elapsed().as_secs();
-        let solution = solver.parse_solution();
-        let error_rate = error_rate(&solution, tags);
-        let s = format!("{:.5} {}\n", error_rate, runtime);
-        output.write(s.as_bytes()).unwrap();
-    }
-}
-
-fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Vec<Vec<usize>>) -> f64 {
+fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Vec<Vec<Option<usize>>>) -> f64 {
     let mut errors = 0.0;
     let mut total = 0.0;
     let mut error_per_seq = 0.0;
@@ -99,11 +69,16 @@ fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Vec<Vec<usize>>) -> f
         let mut local_err = 0.0;
         let prediction = &predictions[i];
         for j in 0..prediction.len() {
-            if prediction[j] != truth[i][j] {
-                errors += 1.0;
-                local_err += 1.0;
+            match truth[i][j] {
+                Some(t) => {
+                    if prediction[j] != t {
+                        errors += 1.0;
+                        local_err += 1.0;
+                    }
+                    total += 1.0;
+                },
+                None => ()
             }
-            total += 1.0;
         }
         if local_err != 0.0 {
             error_per_seq += local_err;
@@ -118,67 +93,90 @@ fn main() {
     let matches = App::new("Consistent viterbi")
         .version("0.1")
         .author("Alexandre Dubray <alexandre.dubray@uclouvain.be>")
-        .about("Multiple viterbi with consistency constraints")
-        .arg(Arg::new("config")
-            .short('c')
-            .long("config")
-            .value_name("FILE")
-            .about("configuration file")
+        .about("Hidden Markov Model with consistency constraints")
+        .arg(Arg::new("INPUT")
+            .short('i')
+            .long("input")
+            .about("Path to the file with the input sequences")
             .takes_value(true)
             .required(true))
-        .arg(Arg::new("exp")
-            .short('e')
-            .long("exp")
-            .value_name("EXPERIENCES")
-            .about("launch experiences or not")
-            .takes_value(false))
+        .arg(Arg::new("TAGS")
+            .short('t')
+            .long("tags")
+            .about("Path to the file containing the tags of the sequences")
+            .takes_value(true)
+            .required(true))
+        .arg(Arg::new("CONTROL")
+            .long("control")
+            .about("Path to control tags")
+            .takes_value(true)
+            .required(true))
+        .arg(Arg::new("OUTPUT")
+            .short('o')
+            .long("output")
+            .about("Path for output")
+            .takes_value(true)
+            .default_value("."))
+        .arg(Arg::new("CONSTRAINT")
+            .short('c')
+            .long("constraint")
+            .about("Path to the file containing the constraints")
+            .takes_value(true)
+            .required(true))
+        .arg(Arg::new("NSTATES")
+            .short('n')
+            .long("nstates")
+            .about("Number of hidden states in the HMM")
+            .takes_value(true)
+            .required(true))
+        .arg(Arg::new("NOBS")
+            .short('b')
+            .long("nobs")
+            .about("Number of observations per features")
+            .takes_value(true)
+            .min_values(1))
+        .arg(Arg::new("PROP")
+            .short('p')
+            .long("prop")
+            .about("Propostion of constraints to include when decoding")
+            .required(true)
+            .takes_value(true))
         .get_matches();
 
-    let mut config = if let Some(f) = matches.value_of("config") {
-        utils::Config::from_config_file(std::path::PathBuf::from(f))
-    } else {
-        panic!("No config file provided")
-    };
+    let input_path = PathBuf::from(matches.value_of("INPUT").unwrap());
+    let tags_path = PathBuf::from(matches.value_of("TAGS").unwrap());
+    let control_tags_path = PathBuf::from(matches.value_of("CONTROL").unwrap());
+    let output_path = PathBuf::from(matches.value_of("OUTPUT").unwrap());
+    let cstr_path = PathBuf::from(matches.value_of("CONSTRAINT").unwrap());
+    let nstates = matches.value_of("NSTATES").unwrap().parse::<usize>().unwrap();
+    let nobs: Vec<usize> = matches.values_of("NOBS").unwrap().map(|x| x.parse::<usize>().unwrap()).collect();
+    let prop = matches.value_of("PROP").unwrap().parse::<f64>().unwrap();
 
-    let exp = matches.occurrences_of("exp") == 1;
+    let sequences = utils::load_sequences::<2>(&input_path);
+    let tags = utils::load_tags(&tags_path);
+    let control_tags = utils::load_tags(&control_tags_path);
+    //let mut constraints = Constraints::from_file(&cstr_path);
+    let mut constraints = Constraints::from_tags(&tags, 4);
+    constraints.keep_prop(prop);
 
-    let sequences = config.get_sequences::<1>();
-    let tags = config.get_tags();
-
-    let mut info: Vec<Vec<Option<usize>>> = Vec::new();
-    for ts in &tags {
-        let mut c: Vec<Option<usize>> = Vec::new();
-        for t in ts {
-            c.push(Some(*t));
-        }
-        info.push(c);
+    let mut hmm = HMM::new(nstates, [nobs[0], nobs[1]]);
+    //hmm.train_supervised(&sequences, &tags);
+    let mut rng = thread_rng();
+    let mut a_prio = Array2::from_shape_fn((nstates, nstates), |_| rng.gen::<f64>());
+    a_prio[[1, 2]] = 0.0;
+    a_prio[[2, 1]] = 0.0;
+    a_prio[[1, 3]] = 0.0;
+    a_prio[[3, 1]] = 0.0;
+    a_prio[[2, 3]] = 0.0;
+    a_prio[[3, 2]] = 0.0;
+    for state in 0..nstates {
+        let mut a_row = a_prio.row_mut(state);
+        let s = a_row.sum();
+        a_row /= s;
     }
-
-    let mut hmm = HMM::new(config.nstates, [config.nobs]);
-    //hmm.train_supervised(&sequences, &tags, config.nstates);
-    hmm.train_semi_supervised(&sequences, &info, config.nstates, 100, 0.01);
-    
-    let mut constraints = config.get_constraints();
-
-    constraints.keep_prop(config.get_prop());
+    hmm.train_semi_supervised(&sequences, &tags, Some(a_prio), 100, 0.01);
 
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
-    super_seq.recompute_constraints(config.get_prop());
-
-    if config.is_global_opti() {
-        if exp {
-            global_opti_exp(&hmm, &mut super_seq, &tags, &config);
-        } else {
-            global_opti(&hmm, &mut super_seq, &tags);
-            //global_opti(&hmm, &mut super_seq, &truth);
-        }
-    } else if config.is_dp() {
-        if exp {
-            dp_exp(&hmm, &mut super_seq, &tags, &config);
-        } else {
-            dp(&hmm, &mut super_seq, &tags);
-        }
-    } else if config.is_viterbi() {
-        //viterbi(&hmm, &sequences, &tags);
-    }
+    super_seq.recompute_constraints(prop);
+    global_opti(&hmm, &mut super_seq, &control_tags);
 }

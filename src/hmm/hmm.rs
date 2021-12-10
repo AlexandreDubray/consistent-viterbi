@@ -184,13 +184,13 @@ impl<const D: usize> HMM<D> {
                         }
                         if t < sequence.len() - 1 {
                             let s = xis.slice(s![t, .., ..]).sum();
-                            assert!(s != 0.0 && s.is_finite());
+                            assert!(s.is_finite());
                             let m = &xis.slice(s![t, .., ..]) / s;
                             xis.slice_mut(s![t, .., ..]).assign(&m);
                         }
                         if t != beta_index && beta_index < sequence.len() - 1 {
                             let s = xis.slice(s![beta_index, .., ..]).sum();
-                            assert!(s != 0.0 && s.is_finite());
+                            assert!(s.is_finite());
                             let m = &xis.slice(s![beta_index, .., ..]) / s;
                             xis.slice_mut(s![beta_index, .., ..]).assign(&m);
                         }
@@ -219,7 +219,6 @@ impl<const D: usize> HMM<D> {
             let mut delta_a = 0.0;
             let mut delta_b = 0.0;
             let mut delta_pi = 0.0;
-            let mut delta_omega = 0.0;
             for state in 0..nstates {
                 let a_row = &a_num.row(state) / a_den[state];
                 let a_diff = &a_row - &self.a.row(state);

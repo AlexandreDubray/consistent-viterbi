@@ -152,6 +152,7 @@ fn main() {
     let nobs: Vec<usize> = matches.values_of("NOBS").unwrap().map(|x| x.parse::<usize>().unwrap()).collect();
     let prop = matches.value_of("PROP").unwrap().parse::<f64>().unwrap();
 
+    println!("Loading data");
     let sequences = utils::load_sequences::<2>(&input_path);
     let tags = utils::load_tags(&tags_path);
     let control_tags = utils::load_tags(&control_tags_path);
@@ -174,6 +175,7 @@ fn main() {
         let s = a_row.sum();
         a_row /= s;
     }
+    println!("Training HMM");
     hmm.train_semi_supervised(&sequences, &tags, Some(a_prio), 100, 0.01);
 
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);

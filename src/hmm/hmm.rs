@@ -3,7 +3,7 @@ use rand::prelude::*;
 use std::time::Instant;
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
-use std::fs::write;
+use std::fs::{write, read_to_string};
 
 
 #[derive(Serialize,Deserialize)]
@@ -290,5 +290,11 @@ impl<const D: usize> HMM<D> {
         opath.push("hmm.json");
         let serialized = serde_json::to_string(&self).unwrap();
         write(opath, serialized).unwrap();
+    }
+
+    pub fn from_json(ipath: &mut PathBuf) -> Self {
+        ipath.push("hmm.json");
+        let serialized = read_to_string(ipath).unwrap();
+        serde_json::from_str(&serialized).unwrap()
     }
 }

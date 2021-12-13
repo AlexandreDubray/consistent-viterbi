@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 csv = "1.1"
-ndarray = { version = "0.15.0", features=["blas"] }
+ndarray = { version = "0.15.0", features=["blas", "serde"] }
 blas-src = { version = "0.8.0", features=["openblas"] }
 openblas-src = { version = "0.10", features=["cblas", "system"] }
 ndarray-csv = "0.5.1"
@@ -18,3 +18,5 @@ gurobi = "0.3.4"
 rand = {version= "0.8.4", features=["alloc"]}
 clap = "3.0.0-beta.4"
 matrixmultiply = "0.2"
+serde = {version = "1.0.131", features=["derive"]}
+serde_json = "1.0"

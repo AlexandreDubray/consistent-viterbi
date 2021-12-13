@@ -146,7 +146,7 @@ fn main() {
     let input_path = PathBuf::from(matches.value_of("INPUT").unwrap());
     let tags_path = PathBuf::from(matches.value_of("TAGS").unwrap());
     let control_tags_path = PathBuf::from(matches.value_of("CONTROL").unwrap());
-    let output_path = PathBuf::from(matches.value_of("OUTPUT").unwrap());
+    let mut output_path = PathBuf::from(matches.value_of("OUTPUT").unwrap());
     let cstr_path = PathBuf::from(matches.value_of("CONSTRAINT").unwrap());
     let nstates = matches.value_of("NSTATES").unwrap().parse::<usize>().unwrap();
     let nobs: Vec<usize> = matches.values_of("NOBS").unwrap().map(|x| x.parse::<usize>().unwrap()).collect();
@@ -177,6 +177,7 @@ fn main() {
     }
     println!("Training HMM");
     hmm.train_semi_supervised(&sequences, &tags, Some(a_prio), 100, 0.01);
+    hmm.write(&mut output_path);
 
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
     super_seq.recompute_constraints(prop);

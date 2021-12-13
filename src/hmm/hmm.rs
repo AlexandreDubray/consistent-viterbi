@@ -1,7 +1,12 @@
 use ndarray::prelude::*;
 use rand::prelude::*;
 use std::time::Instant;
+use std::path::PathBuf;
+use serde::{Serialize, Deserialize};
+use std::fs::write;
 
+
+#[derive(Serialize,Deserialize)]
 pub struct HMM<const D: usize> {
     pub a: Array2<f64>,
     pub b: Array1<Array<f64, IxDyn>>,
@@ -281,4 +286,9 @@ impl<const D: usize> HMM<D> {
         self.log(self.b[state][&obs[..]])
     }
 
+    pub fn write(&self, opath: &mut PathBuf) {
+        opath.push("hmm.json");
+        let serialized = serde_json::to_string(&self).unwrap();
+        write(opath, serialized).unwrap();
+    }
 }

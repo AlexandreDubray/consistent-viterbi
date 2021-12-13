@@ -179,23 +179,23 @@ impl<const D: usize> HMM<D> {
                             if t < sequence.len() - 1 {
                                 let bmul = self.b.map(|r| r[&sequence[t+1][..]]);
                                 let r = alphas[[t, state]]*&self.a.row(state)*&betas.row(t+1)*&bmul;
-                                xis.slice_mut(s![t, state, ..]).assign(&(&r / s));
+                                xis.slice_mut(s![t, state, ..]).assign(&r);
                             }
                             if t != beta_index && beta_index < sequence.len() - 1 {
                                 let bmul = self.b.map(|r| r[&sequence[beta_index+1][..]]);
                                 let r = alphas[[beta_index, state]]*&self.a.row(state)*&betas.row(beta_index+1)*&bmul;
-                                xis.slice_mut(s![beta_index, state, ..]).assign(&(&r / s));
+                                xis.slice_mut(s![beta_index, state, ..]).assign(&r);
                             }
                         }
                         if t < sequence.len() - 1 {
                             let s = xis.slice(s![t, .., ..]).sum();
-                            assert!(s.is_finite());
+                            assert!(s != 0.0 && s.is_finite());
                             let m = &xis.slice(s![t, .., ..]) / s;
                             xis.slice_mut(s![t, .., ..]).assign(&m);
                         }
                         if t != beta_index && beta_index < sequence.len() - 1 {
                             let s = xis.slice(s![beta_index, .., ..]).sum();
-                            assert!(s.is_finite());
+                            assert!(s != 0.0 && s.is_finite());
                             let m = &xis.slice(s![beta_index, .., ..]) / s;
                             xis.slice_mut(s![beta_index, .., ..]).assign(&m);
                         }

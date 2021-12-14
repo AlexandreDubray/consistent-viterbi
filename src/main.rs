@@ -6,7 +6,6 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use rand::prelude::*;
-use ndarray::Array2;
 
 extern crate openblas_src;
 
@@ -37,7 +36,7 @@ fn viterbi<const D: usize>(hmm: &HMM<D>, sequences: &Vec<Vec<[usize; D]>>, tags:
 }
 */
 
-fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, tags: &Vec<Vec<Option<usize>>>) {
+fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, tags: &Vec<Vec<Option<usize>>>) -> Array1<Array1<usize>> {
     sequence.reorder();
     let mut model = GlobalOpti::new(hmm, sequence);
     model.build_model();
@@ -46,6 +45,7 @@ fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, ta
     let solution = sequence.parse_solution(predictions);
     let error_rate = error_rate(&solution, tags);
     println!("Error rate is {:5} in {} secs", error_rate, time);
+    solution
 }
 
 fn dp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D>, tags: &Vec<Vec<Option<usize>>>) {
@@ -162,24 +162,28 @@ fn main() {
 
     let mut hmm = HMM::new(nstates, [nobs[0], nobs[1]]);
     //hmm.train_supervised(&sequences, &tags);
-    let mut rng = thread_rng();
-    let mut a_prio = Array2::from_shape_fn((nstates, nstates), |_| rng.gen::<f64>());
-    a_prio[[1, 2]] = 0.0;
-    a_prio[[2, 1]] = 0.0;
-    a_prio[[1, 3]] = 0.0;
-    a_prio[[3, 1]] = 0.0;
-    a_prio[[2, 3]] = 0.0;
-    a_prio[[3, 2]] = 0.0;
-    for state in 0..nstates {
-        let mut a_row = a_prio.row_mut(state);
-        let s = a_row.sum();
-        a_row /= s;
-    }
     println!("Training HMM");
-    hmm.train_semi_supervised(&sequences, &tags, Some(a_prio), 100, 0.01);
+    hmm.train_semi_supervised(&sequences, &tags, None, 100, 0.01);
     hmm.write(&mut output_path);
 
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
     super_seq.recompute_constraints(prop);
-    global_opti(&hmm, &mut super_seq, &control_tags);
+    let solution = global_opti(&hmm, &mut super_seq, &control_tags);
+
+    output_path.push("solution");
+    let mut file = File::create(&output_path).unwrap();
+
+    for i in 0..solution.len() {
+        let sol = &solution[i];
+        let exp = &control_tags[i];
+        for j in 0..sol.len() {
+            let predicted = sol[j];
+            let expected = match exp[j] {
+                Some(tag) => tag as i32,
+                None => -1
+            };
+            file.write_all(format!("{} {}\n", predicted, expected).as_bytes()).unwrap();
+        }
+        file.write_all("\n".as_bytes()).unwrap();
+    }
 }

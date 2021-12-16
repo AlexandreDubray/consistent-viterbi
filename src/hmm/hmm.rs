@@ -295,13 +295,13 @@ impl<const D: usize> HMM<D> {
     }
 
     pub fn write(&self, opath: &mut PathBuf) {
-        opath.push("hmm.json");
+        opath.set_file_name("hmm.json");
         let serialized = serde_json::to_string(&self).unwrap();
         write(opath, serialized).unwrap();
     }
 
     pub fn from_json(ipath: &mut PathBuf) -> Self {
-        ipath.push("hmm.json");
+        ipath.set_file_name("hmm.json");
         let serialized = read_to_string(ipath).unwrap();
         serde_json::from_str(&serialized).unwrap()
     }

@@ -63,6 +63,8 @@ impl<const D: usize> HMM<D> {
             self.pi[state] /= sequences.len() as f64;
             self.b[state] /= seen_states[state];
         }
+
+        self.log();
     }
 
     fn check_row_sum(&self, row: ArrayView1<f64>) -> bool {
@@ -254,36 +256,42 @@ impl<const D: usize> HMM<D> {
             a_t = self.a.t();
         }
 
+        self.log();
+    }
+
+    fn log(&mut self) {
+        let map_log = |x: f64| -> f64 {
+            if x == 0.0 {
+                f64::NEG_INFINITY
+            } else {
+                x.log(10.0)
+            }
+        };
+        self.a.mapv_inplace(map_log);
+        for state in 0..self.b.len() {
+            self.b[state].mapv_inplace(map_log);
+        }
+        self.pi.mapv_inplace(map_log);
     }
 
     pub fn nstates(&self) -> usize {
         self.a.nrows()
     }
 
-    fn log(&self, p: f64) -> f64 {
-        if p == 0.0 {
-            f64::NEG_INFINITY
-        } else {
-            p.log(10.0)
-        }
-    }
-
     pub fn init_prob(&self, state: usize, obs: [usize; D]) -> f64 {
-        self.log(self.pi[state]*self.b[state][&obs[..]])
+        self.pi[state] + self.b[state][&obs[..]]
     }
 
     pub fn transition_prob(&self, state_from: usize, state_to: usize, obs: [usize; D]) -> f64 {
-        self.log(self.a[[state_from, state_to]]*self.b[state_to][&obs[..]])
+        self.a[[state_from, state_to]] + self.b[state_to][&obs[..]]
     }
 
-    pub fn transitions_to(&self, state_to: usize) -> Array1<f64> {
-        let ret = self.a.slice(s![.., state_to]);
-        let ret = ret.map(|x| self.log(*x));
-        ret
+    pub fn transitions_to(&self, state_to: usize) -> ArrayView1<f64> {
+        self.a.column(state_to)
     }
 
     pub fn emit_prob(&self, state: usize, obs: [usize; D]) -> f64 {
-        self.log(self.b[state][&obs[..]])
+        self.b[state][&obs[..]]
     }
 
     pub fn write(&self, opath: &mut PathBuf) {

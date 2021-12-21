@@ -2,14 +2,17 @@ use ndarray::prelude::*;
 use rand::prelude::*;
 use std::time::Instant;
 use std::path::PathBuf;
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, Deserializer};
 use std::fs::{write, read_to_string};
 
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct HMM<const D: usize> {
+    #[serde(deserialize_with="parse_transmat")]
     pub a: Array2<f64>,
+    #[serde(deserialize_with="parse_bmat")]
     pub b: Array1<Array<f64, IxDyn>>,
+    #[serde(deserialize_with="parse_pi")]
     pub pi: Array1<f64>,
 }
 
@@ -305,4 +308,22 @@ impl<const D: usize> HMM<D> {
         let serialized = read_to_string(ipath).unwrap();
         serde_json::from_str(&serialized).unwrap()
     }
+}
+
+fn parse_transmat<'de, A>(d: A) -> Result<Array2<f64>, A::Error> where A: Deserializer<'de> {
+    Deserialize::deserialize(d).map(|x: Array2<Option<_>>| {
+        x.map(|y: &Option<_>| {
+            y.unwrap_or(f64::NEG_INFINITY)
+        })
+    })
+}
+
+fn parse_bmat<'de, A>(d: A) -> Result<Array1<Array<f64, IxDyn>>, A::Error> where A: Deserializer<'de> {
+    Deserialize::deserialize(d).map(|x: Array1<Array<Option<f64>, IxDyn>>| {
+        x.map(|y| y.map(|v| v.unwrap_or(f64::NEG_INFINITY)))
+    })
+}
+
+fn parse_pi<'de, A>(d: A) -> Result<Array1<f64>, A::Error> where A: Deserializer<'de> {
+    Deserialize::deserialize(d).map(|x: Array1<Option<f64>>| x.map(|v| v.unwrap_or(f64::NEG_INFINITY)))
 }

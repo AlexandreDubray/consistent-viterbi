@@ -21,21 +21,6 @@ use viterbi_solver::viterbi::decode;
 use viterbi_solver::constraints::Constraints;
 
 
-/*
-fn viterbi<const D: usize>(hmm: &HMM<D>, sequences: &Vec<Vec<[usize; D]>>, tags: &Array1<Array1<usize>>) {
-    let mut max_seq_size = 0;
-    for sequence in sequences {
-        max_seq_size = max_seq_size.max(sequence.len());
-    }
-
-    let start = Instant::now();
-    let predictions = sequences.map(|sequence| -> Array1<usize> { decode(&sequence, hmm) });
-    let elapsed = start.elapsed().as_secs();
-    let error_rate = error_rate(&predictions, tags);
-    println!("Error rate {:.5} in {} sec", error_rate, elapsed);
-}
-*/
-
 fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, tags: &Vec<Vec<Option<usize>>>) -> Array1<Array1<usize>> {
     sequence.reorder();
     let mut model = GlobalOpti::new(hmm, sequence);
@@ -48,16 +33,16 @@ fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, ta
     solution
 }
 
-fn dp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D>, tags: &Vec<Vec<Option<usize>>>) {
+fn dp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D>, tags: &Vec<Vec<Option<usize>>>) -> Array1<Array1<usize>> {
     let mut solver = DPSolver::new(hmm, sequence);
     solver.reorder();
     let start = Instant::now();
-    //solver.dp_solving();
-    solver.iterative_solving();
+    solver.dp_solving();
     let elapsed = start.elapsed().as_millis();
     let solution = solver.parse_solution();
     let error_rate = error_rate(&solution, tags);
     println!("Error rate is {:5} in {} secs", error_rate, elapsed);
+    solution
 }
 
 fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Vec<Vec<Option<usize>>>) -> f64 {
@@ -160,12 +145,14 @@ fn main() {
     let mut constraints = Constraints::from_tags(&tags, 4);
     constraints.keep_prop(prop);
 
+    /*
     let mut hmm = HMM::new(nstates, [nobs[0], nobs[1]]);
     //hmm.train_supervised(&sequences, &tags);
     println!("Training HMM");
     hmm.train_semi_supervised(&sequences, &tags, None, 100, 0.01);
     hmm.write(&mut output_path);
-
+    */
+    let hmm = HMM::from_json(&mut output_path);
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
     super_seq.recompute_constraints(prop);
     let solution = global_opti(&hmm, &mut super_seq, &control_tags);

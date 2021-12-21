@@ -22,11 +22,12 @@ impl DPEntry {
         Self {time, state, cstr_paths}
     }
 
-    pub fn update(&mut self, cost: f64, from: Option<Backtrack>, cstr: NodePtr) {
+    pub fn update(&mut self, cost: f64, from: Option<Backtrack>, cstr: NodePtr) -> bool {
         let entry = self.cstr_paths.entry(cstr).or_insert((f64::NEG_INFINITY, None));
         if cost > entry.0 {
             *entry = (cost, from);
         }
+        cost > entry.0
     }
 
     pub fn len(&self) -> usize {
@@ -69,9 +70,6 @@ pub struct DPSolver<'a, const D: usize> {
     hmm: &'a HMM<D>,
     sequence: &'a mut SuperSequence<'a, D>,
     table: HashMap<(i32, usize), DPEntry>,
-    optimum: bool,
-    constraint_choices: Array1<i32>,
-    violated_constraints: Array1<bool>
 }
 
 impl<'b, const D: usize> DPSolver<'b, D> {
@@ -79,9 +77,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
     pub fn new(hmm: &'b HMM<D>, sequence: &'b mut SuperSequence<'b, D>) -> Self {
         let solution = Array1::from_elem(sequence.len(), 0);
         let table: HashMap<(i32, usize), DPEntry> = HashMap::new();
-        let constraint_choices = Array1::from_elem(sequence.nb_cstr, -1);
-        let violated_constraints = Array1::from_elem(sequence.nb_cstr, false);
-        Self {solution, hmm, sequence, table, optimum: false, constraint_choices, violated_constraints}
+        Self {solution, hmm, sequence, table}
     }
 
     fn prune(&self, idx: usize, dp_entry: &mut DPEntry, finished_constraints: &Vec<bool>) {
@@ -122,29 +118,6 @@ impl<'b, const D: usize> DPSolver<'b, D> {
         }
     }
 
-    pub fn iterative_solving(&mut self) {
-        self.sequence.deactive_constraints();
-        let mut count = 0;
-        while !self.optimum {
-            println!("Run {}", count+1);
-            self.sequence.reorder();
-            self.optimum = true;
-            self.dp_solving();
-            println!("Optimum? {}", self.optimum);
-            if !self.optimum {
-                // Find the next cstr to add
-                for comp_id in 0..self.sequence.nb_cstr {
-                    if self.violated_constraints[comp_id] && !self.sequence.active_constraints[comp_id] {
-                        println!("Activate constraint {}", comp_id);
-                        self.sequence.activate_constraint(comp_id);
-                    }
-                }
-
-            }
-            count += 1;
-        }
-    }
-
     pub fn dp_solving(&mut self) {
         let root = Rc::new(CstrNode::new(self.sequence.nb_cstr, 0, None));
         self.table.clear();
@@ -164,6 +137,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
             // Check if the layer is constrained?
             let is_constrained = self.sequence.is_constrained(idx);
 
+            let mut updated = false;
             for state_to in 0..self.hmm.nstates() {
                 if is_constrained && !valid_states[element.constraint_component as usize].contains(&state_to) {
                     // In a previous layer of the same component, this state was not possible. So even
@@ -187,7 +161,8 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                             if !is_constrained {
                                 for (cstr_node_id, value) in &entry.cstr_paths {
                                     let cost = value.0 + arc_cost;
-                                    dp_entry.update(cost, Some((entry.time, entry.state, Rc::clone(cstr_node_id))), Rc::clone(cstr_node_id));
+                                    let u = dp_entry.update(cost, Some((entry.time, entry.state, Rc::clone(cstr_node_id))), Rc::clone(cstr_node_id));
+                                    updated = updated || u;
                                 }
                             } else {
                                 let ucomp = element.constraint_component as usize;
@@ -200,12 +175,17 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                                     let choice = leaf.get_choice(ucomp).unwrap();
                                     if choice == state_to {
                                         let cost = value.0 + arc_cost;
-                                        dp_entry.update(cost, Some((entry.time, entry.state, Rc::clone(cstr_node_id))), Rc::clone(&leaf));
+                                        let u = dp_entry.update(cost, Some((entry.time, entry.state, Rc::clone(cstr_node_id))), Rc::clone(&leaf));
+                                        updated = updated || u;
                                     }
                                 }
                             }
                         }
                     };
+                }
+
+                if !updated {
+                    panic!("No possible state at time {} for element {:?}", idx, element);
                 }
                 // Let assume that we saw the last elements of Ci, every path of constraints
                 // looks like
@@ -219,13 +199,8 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                 // discard the choices with the lowest value (since whatever happens in the
                 // rest of the DAG, it will apply to both choices paths)
 
-                let mut should_prune = false;
                 if is_constrained && element.last_of_constraint {
-                    should_prune = true;
                     finished_constraints[element.constraint_component as usize] = true;
-                }
-
-                if should_prune {
                     self.prune(idx, &mut dp_entry, &finished_constraints);
                 }
 
@@ -258,19 +233,12 @@ impl<'b, const D: usize> DPSolver<'b, D> {
             };
         }
 
-        self.violated_constraints.fill(false);
         let mut current  = dp_entry_target.unwrap();
         for idx in (0..self.solution.len()).rev() {
             self.solution[idx] = current.state;
             if self.sequence[idx].constraint_component != -1 {
                 let element = &self.sequence[idx];
                 let ucomp = element.constraint_component as usize;
-                if self.constraint_choices[ucomp] == -1 {
-                    self.constraint_choices[ucomp] = current.state as i32;
-                } else if self.constraint_choices[ucomp] != current.state as i32 {
-                    self.optimum = false;
-                    self.violated_constraints[ucomp] = true;
-                }
             }
             let (_, from) = current.cstr_paths.get(best_cstr_path.unwrap()).unwrap();
             if idx != 0 {

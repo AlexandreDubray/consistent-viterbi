@@ -176,6 +176,7 @@ impl<const D: usize> HMM<D> {
             let elapsed = start.elapsed().as_secs();
             println!("[train hmm]\t {} seconds", elapsed);
         }
+        self.log();
     }
 
     fn log(&mut self) {

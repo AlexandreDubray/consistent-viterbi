@@ -145,13 +145,12 @@ fn main() {
     let mut constraints = Constraints::from_tags(&tags, 4);
     constraints.keep_prop(prop);
 
-    /*
     let mut hmm = HMM::new(nstates, [nobs[0], nobs[1]]);
     //hmm.train_supervised(&sequences, &tags);
     println!("Training HMM");
-    hmm.train_semi_supervised(&sequences, &tags, None, 100, 0.01);
+    hmm.train(&sequences, &tags, 100, 0.01);
     hmm.write(&mut output_path);
-    */
+
     let hmm = HMM::from_json(&mut output_path);
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
     super_seq.recompute_constraints(prop);

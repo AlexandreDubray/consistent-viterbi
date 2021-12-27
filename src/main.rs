@@ -154,7 +154,8 @@ fn main() {
     let hmm = HMM::from_json(&mut output_path);
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
     super_seq.recompute_constraints(prop);
-    let solution = global_opti(&hmm, &mut super_seq, &control_tags);
+    //let solution = global_opti(&hmm, &mut super_seq, &control_tags);
+    let solution = dp(&hmm, &mut super_seq, &control_tags);
 
     output_path.push("solution");
     let mut file = File::create(&output_path).unwrap();

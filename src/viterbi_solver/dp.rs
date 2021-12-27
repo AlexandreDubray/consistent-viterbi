@@ -5,24 +5,23 @@ use std::rc::Rc;
 use super::super::hmm::hmm::HMM;
 use super::utils::SuperSequence;
 
-type NodePtr = Rc<CstrNode>;
-type Backtrack = (usize, usize, NodePtr);
+type Backtrack = (usize, usize, usize);
 
 #[derive(Debug)]
 struct DPEntry {
     pub time: usize,
     pub state: usize,
-    pub cstr_paths: HashMap<NodePtr, (f64, Option<Backtrack>)>,
+    pub cstr_paths: HashMap<usize, (f64, Option<Backtrack>)>,
 }
 
 impl DPEntry {
 
     pub fn new(time: usize, state: usize) -> Self {
-        let cstr_paths: HashMap<NodePtr, (f64, Option<Backtrack>)> = HashMap::new();
+        let cstr_paths: HashMap<usize, (f64, Option<Backtrack>)> = HashMap::new();
         Self {time, state, cstr_paths}
     }
 
-    pub fn update(&mut self, cost: f64, from: Option<Backtrack>, cstr: NodePtr) -> bool {
+    pub fn update(&mut self, cost: f64, from: Option<Backtrack>, cstr: usize) -> bool {
         let entry = self.cstr_paths.entry(cstr).or_insert((f64::NEG_INFINITY, None));
         if cost > entry.0 {
             *entry = (cost, from);
@@ -32,36 +31,6 @@ impl DPEntry {
 
     pub fn len(&self) -> usize {
         self.cstr_paths.len()
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct CstrNode {
-    pub comp_id: usize,
-    pub choice: usize,
-    pub from: Option<Rc<CstrNode>>
-}
-
-impl CstrNode {
-
-    pub fn new(comp_id: usize, choice: usize, from: Option<Rc<CstrNode>>) -> Self {
-        Self { comp_id, choice, from }
-    }
-
-    pub fn get_choice(&self, comp_id: usize) -> Result<usize, String> {
-        if self.comp_id == comp_id {
-            Ok(self.choice)
-        } else {
-            let mut current = &self.from;
-            while current.is_some() {
-                let n = current.as_ref().unwrap();
-                if n.comp_id == comp_id {
-                    return Ok(n.choice)
-                }
-                current = &n.from;
-            }
-            Err(format!("Did not find choice for comp {}", comp_id))
-        }
     }
 }
 
@@ -80,6 +49,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
         Self {solution, hmm, sequence, table}
     }
 
+    /*
     fn prune(&self, idx: usize, dp_entry: &mut DPEntry, finished_constraints: &Vec<bool>) {
         let mut to_remove: Vec<Rc<CstrNode>> = Vec::new();
         let cstr_node_ids: Vec<&NodePtr> = dp_entry.cstr_paths.keys().collect();
@@ -117,13 +87,15 @@ impl<'b, const D: usize> DPSolver<'b, D> {
             dp_entry.cstr_paths.remove(&tr);
         }
     }
+    */
 
     pub fn dp_solving(&mut self) {
-        let root = Rc::new(CstrNode::new(self.sequence.nb_cstr, 0, None));
-        self.table.clear();
+        // There are nstates but the fact that a component has no assigned state is represented by
+        // 0, thus we need nstates + 1 integers
+        let nb_cstr_choice = self.hmm.nstates() + 1;
 
         let mut dp_entry_source = DPEntry::new(0, 0);
-        dp_entry_source.update(0.0, None, root);
+        dp_entry_source.update(0.0, None, 0);
         self.table.insert((-1, 0), dp_entry_source);
 
         let mut finished_constraints: Vec<bool> = (0..self.sequence.nb_cstr).map(|_| false).collect();
@@ -159,23 +131,19 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                         None => (),
                         Some(entry) => {
                             if !is_constrained {
-                                for (cstr_node_id, value) in &entry.cstr_paths {
+                                for (cstr_id, value) in &entry.cstr_paths {
                                     let cost = value.0 + arc_cost;
-                                    let u = dp_entry.update(cost, Some((entry.time, entry.state, Rc::clone(cstr_node_id))), Rc::clone(cstr_node_id));
+                                    let u = dp_entry.update(cost, Some((entry.time, entry.state, *cstr_id)), *cstr_id);
                                     updated = updated || u;
                                 }
                             } else {
                                 let ucomp = element.constraint_component as usize;
-                                for (cstr_node_id, value) in &entry.cstr_paths {
-                                    let leaf = if idx == self.sequence.first_pos_cstr[ucomp] {
-                                        Rc::new(CstrNode::new(ucomp, state_to, Some(Rc::clone(cstr_node_id))))
-                                    } else {
-                                        Rc::clone(cstr_node_id)
-                                    };
-                                    let choice = leaf.get_choice(ucomp).unwrap();
-                                    if choice == state_to {
+                                for (cstr_id, value) in &entry.cstr_paths {
+                                    let choice = (cstr_id / nb_cstr_choice.pow(ucomp as u32)) % nb_cstr_choice;
+                                    if choice == 0 || choice == state_to {
                                         let cost = value.0 + arc_cost;
-                                        let u = dp_entry.update(cost, Some((entry.time, entry.state, Rc::clone(cstr_node_id))), Rc::clone(&leaf));
+                                        let new_cstr_id = cstr_id + state_to * nb_cstr_choice.pow(ucomp as u32);
+                                        let u = dp_entry.update(cost, Some((entry.time, entry.state, *cstr_id)), new_cstr_id);
                                         updated = updated || u;
                                     }
                                 }
@@ -201,7 +169,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
 
                 if is_constrained && element.last_of_constraint {
                     finished_constraints[element.constraint_component as usize] = true;
-                    self.prune(idx, &mut dp_entry, &finished_constraints);
+                    //self.prune(idx, &mut dp_entry, &finished_constraints);
                 }
 
                 if dp_entry.len() > 0 {
@@ -216,7 +184,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
 
     pub fn backtrack(&mut self) {
         let mut dp_entry_target: Option<&DPEntry> = None;
-        let mut best_cstr_path: Option<&NodePtr> = None;
+        let mut best_cstr_path: Option<usize> = None;
         let mut best_cost = f64::NEG_INFINITY;
         for state in 0..self.hmm.nstates() {
             match self.table.get(&(self.sequence.len() as i32 - 1, state)) {
@@ -225,7 +193,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                         if value.0 > best_cost {
                             best_cost = value.0;
                             dp_entry_target = Some(entry);
-                            best_cstr_path = Some(cstr_path_idx);
+                            best_cstr_path = Some(*cstr_path_idx);
                         }
                     }
                 },
@@ -240,11 +208,11 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                 let element = &self.sequence[idx];
                 let ucomp = element.constraint_component as usize;
             }
-            let (_, from) = current.cstr_paths.get(best_cstr_path.unwrap()).unwrap();
+            let (_, from) = current.cstr_paths.get(&best_cstr_path.unwrap()).unwrap();
             if idx != 0 {
                 let from = from.as_ref().unwrap();
                 let key = (from.0 as i32, from.1);
-                best_cstr_path = Some(&from.2);
+                best_cstr_path = Some(from.2);
                 current = self.table.get(&key).unwrap();
             }
         }

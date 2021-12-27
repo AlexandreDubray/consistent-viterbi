@@ -21,9 +21,9 @@ impl<const D: usize> HMM<D> {
 
     pub fn new(nstates: usize, bdims: [usize; D]) -> Self {
         let mut rng = thread_rng();
-        let mut a = Array2::from_shape_fn((nstates, nstates), |_| rng.gen::<f64>()).normalize_rows();
-        let mut b = Array1::from_shape_fn(nstates, |_| Array::from_shape_fn(&bdims[..], |_| rng.gen::<f64>()).normalize());
-        let mut pi = Array1::from_shape_fn(nstates, |_| rng.gen::<f64>()).normalize();
+        let a = Array2::from_shape_fn((nstates, nstates), |_| rng.gen::<f64>()).normalize_rows();
+        let b = Array1::from_shape_fn(nstates, |_| Array::from_shape_fn(&bdims[..], |_| rng.gen::<f64>()).normalize());
+        let pi = Array1::from_shape_fn(nstates, |_| rng.gen::<f64>()).normalize();
         Self { a, b, pi }
     }
 
@@ -141,7 +141,7 @@ impl<const D: usize> HMM<D> {
                 }).collect()
             }).collect();
 
-            self.pi = gammas.iter().fold(Array1::from_elem(nstates, 0.0), |sum, val| sum + val.row(0)) / r as f64;
+            let new_pi = gammas.iter().fold(Array1::from_elem(nstates, 0.0), |sum, val| sum + val.row(0)) / r as f64;
 
             let a_den = gammas.iter().fold(Array1::from_elem(nstates, 0.0), |sum, val| {
                 sum + Array1::from_shape_fn(nstates, |i| val.slice(s![..-1, i]).sum())
@@ -149,32 +149,42 @@ impl<const D: usize> HMM<D> {
             let a_div = Array2::from_shape_fn((nstates, nstates), |x| a_den[x.0]);
 
 
-            self.a = xis.iter().fold(Array2::from_elem((nstates, nstates), 0.0), |sum, val| {
+            let mut new_a = xis.iter().fold(Array2::from_elem((nstates, nstates), 0.0), |sum, val| {
                 sum + val.iter().fold(Array2::from_elem((nstates, nstates), 0.0), |sum2, val2| sum2 + val2)
-            });
-            self.a /= &a_div;
+            }) / &a_div;
+            
+            let mut new_b = Array1::from_shape_fn(nstates, |i| Array::from_elem(self.b[i].raw_dim(), 0.0));
 
-            for state in 0..nstates {
-                self.b[state].fill(0.0);
-            }
             for sid in 0..sequences.len() {
                 let sequence = &sequences[sid];
                 for t in 0..sequence.len() {
                     let obs = &sequence[t];
                     for state in 0..nstates {
-                        self.b[state][&obs[..]] += gammas[sid][[t, state]];
+                        new_b[state][&obs[..]] += gammas[sid][[t, state]];
                     }
                 }
             }
             let b_den = gammas.iter().fold(Array1::from_elem(nstates, 0.0), |sum, val| {
-                let t = val.nrows();
-                sum + Array1::from_shape_fn(nstates, |i| val.slice(s![.., i]).sum())
+                sum + Array1::from_shape_fn(nstates, |i| val.column(i).sum())
             });
             for state in 0..nstates {
-                self.b[state] /= b_den[state];
+                new_b[state] /= b_den[state];
             }
+
+            let mut d = 0.0;
+            d += (&new_pi - &self.pi).map(|i| i.abs()).sum();
+            d += (&new_a - &self.a).map(|i| i.abs()).sum();
+            d += (0..nstates).map(|state| (&new_b[state] - &self.b[state]).map(|i| i.abs()).sum()).sum::<f64>();
+
+            self.pi = new_pi;
+            self.a = new_a;
+            self.b = new_b;
             let elapsed = start.elapsed().as_secs();
             println!("[train hmm]\t {} seconds", elapsed);
+            if d <= tol {
+                println!("[train hmm]\t Below the tol param, converged");
+                break;
+            }
         }
         self.log();
     }

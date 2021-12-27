@@ -1,6 +1,5 @@
 use ndarray::Array1;
 use std::collections::{HashSet, HashMap};
-use std::rc::Rc;
 
 use super::super::hmm::hmm::HMM;
 use super::utils::SuperSequence;
@@ -41,6 +40,17 @@ pub struct DPSolver<'a, const D: usize> {
     table: HashMap<(i32, usize), DPEntry>,
 }
 
+fn get_cstr_choice(uid: usize, cstr_id: usize, c: usize) -> usize {
+    (uid / c.pow(cstr_id as u32)) % c
+}
+
+fn update_cstr_choice(uid: usize, cstr_id: usize, choice: usize, c: usize) -> usize {
+    let current_choice = get_cstr_choice(uid, cstr_id, c);
+    assert!(current_choice == 0);
+    uid + c.pow(choice as u32)
+}
+
+
 impl<'b, const D: usize> DPSolver<'b, D> {
 
     pub fn new(hmm: &'b HMM<D>, sequence: &'b mut SuperSequence<'b, D>) -> Self {
@@ -49,23 +59,20 @@ impl<'b, const D: usize> DPSolver<'b, D> {
         Self {solution, hmm, sequence, table}
     }
 
-    /*
-    fn prune(&self, idx: usize, dp_entry: &mut DPEntry, finished_constraints: &Vec<bool>) {
-        let mut to_remove: Vec<Rc<CstrNode>> = Vec::new();
-        let cstr_node_ids: Vec<&NodePtr> = dp_entry.cstr_paths.keys().collect();
+    fn prune(&self, dp_entry: &mut DPEntry, finished_constraints: &Vec<bool>) {
+        let mut to_remove: Vec<usize> = Vec::new();
+        let cstr_node_ids: Vec<&usize> = dp_entry.cstr_paths.keys().collect();
+        let c = self.hmm.nstates() + 1;
         for i in 0..cstr_node_ids.len() {
-            if !self.sequence.active_constraints[i] { continue; }
             for j in i+1..cstr_node_ids.len() {
-                if !self.sequence.active_constraints[j] { continue; }
                 let n1 = cstr_node_ids[i];
                 let n2 = cstr_node_ids[j];
+                
                 let mut same = true;
                 for k in 0..self.sequence.nb_cstr {
-                    if self.sequence.first_pos_cstr[k] <= idx {
-                        let c1 = n1.get_choice(k).unwrap();
-                        let c2 = n2.get_choice(k).unwrap();
-                        if !finished_constraints[k] && c1 != c2 {
-                            same = false;
+                    if !finished_constraints[k] {
+                        same = get_cstr_choice(*n1, k, c) == get_cstr_choice(*n2, k, c);
+                        if !same {
                             break;
                         }
                     }
@@ -76,9 +83,9 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                     let v1 = dp_entry.cstr_paths.get(n1).unwrap().0;
                     let v2 = dp_entry.cstr_paths.get(n2).unwrap().0;
                     if v1 > v2 {
-                        to_remove.push(Rc::clone(n2));
+                        to_remove.push(*n2);
                     } else {
-                        to_remove.push(Rc::clone(n1));
+                        to_remove.push(*n1);
                     }
                 }
             }
@@ -87,7 +94,6 @@ impl<'b, const D: usize> DPSolver<'b, D> {
             dp_entry.cstr_paths.remove(&tr);
         }
     }
-    */
 
     pub fn dp_solving(&mut self) {
         // There are nstates but the fact that a component has no assigned state is represented by
@@ -139,10 +145,10 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                             } else {
                                 let ucomp = element.constraint_component as usize;
                                 for (cstr_id, value) in &entry.cstr_paths {
-                                    let choice = (cstr_id / nb_cstr_choice.pow(ucomp as u32)) % nb_cstr_choice;
+                                    let choice = get_cstr_choice(*cstr_id, ucomp, nb_cstr_choice);
                                     if choice == 0 || choice == state_to {
                                         let cost = value.0 + arc_cost;
-                                        let new_cstr_id = cstr_id + state_to * nb_cstr_choice.pow(ucomp as u32);
+                                        let new_cstr_id = update_cstr_choice(*cstr_id, ucomp, state_to, nb_cstr_choice);
                                         let u = dp_entry.update(cost, Some((entry.time, entry.state, *cstr_id)), new_cstr_id);
                                         updated = updated || u;
                                     }
@@ -166,10 +172,13 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                 // if for two different i's, the rest of the choices are the same, we can
                 // discard the choices with the lowest value (since whatever happens in the
                 // rest of the DAG, it will apply to both choices paths)
+                //
+                // More Generally, if for all unfinished constraints, the choices are the same,
+                // keep only the choice with the best value
 
                 if is_constrained && element.last_of_constraint {
                     finished_constraints[element.constraint_component as usize] = true;
-                    //self.prune(idx, &mut dp_entry, &finished_constraints);
+                    self.prune(&mut dp_entry, &finished_constraints);
                 }
 
                 if dp_entry.len() > 0 {

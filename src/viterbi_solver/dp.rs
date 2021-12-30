@@ -5,13 +5,18 @@ use super::super::hmm::hmm::HMM;
 use super::utils::SuperSequence;
 
 fn get_cstr_choice(uid: usize, cstr_id: usize, c: usize) -> usize {
-    (uid / c.pow(cstr_id as u32)) % c
+    // bad
+    // (uid / c.pow(cstr_id as u32)) % c
+    // Good
+    (cstr_id / c.pow(uid as u32)) % c
 }
 
 fn update_cstr_choice(uid: usize, cstr_id: usize, choice: usize, c: usize) -> usize {
     let current_choice = get_cstr_choice(uid, cstr_id, c);
     assert!(current_choice == 0);
-    uid + c.pow(choice as u32)
+    // bad
+    //uid + c.pow(choice as u32)
+    cstr_id + choice*c.pow(uid as u32)
 }
 
 
@@ -19,7 +24,8 @@ pub struct DPSolver<'a, const D: usize> {
     pub solution: Array1<usize>,
     hmm: &'a HMM<D>,
     sequence: &'a mut SuperSequence<'a, D>,
-    table: Array1<HashMap<(usize, usize), (usize, usize, f64)>>
+    table: Array1<HashMap<(usize, usize), (usize, usize, f64)>>,
+    pub objective: f64
 }
 
 
@@ -28,7 +34,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
     pub fn new(hmm: &'b HMM<D>, sequence: &'b mut SuperSequence<'b, D>) -> Self {
         let solution = Array1::from_elem(sequence.len(), 0);
         let table: Array1<HashMap<(usize, usize), (usize, usize, f64)>> = Array1::from_elem(sequence.len(), HashMap::new());
-        Self {solution, hmm, sequence, table}
+        Self {solution, hmm, sequence, table, objective: 0.0}
     }
 
     fn prune(&mut self, t: usize, finished_constraints: &Vec<bool>) {
@@ -100,13 +106,10 @@ impl<'b, const D: usize> DPSolver<'b, D> {
         }
 
         for idx in 1.. self.sequence.len() {
-            if idx % 10000 == 0 {
-                println!("{}/{}", idx, self.sequence.len());
-            }
             let element = &self.sequence[idx];
-            // Check if the layer is constrained?
             let is_constrained = self.sequence.is_constrained(idx);
 
+            let mut updated = false;
             for state_to in 0..self.hmm.nstates() {
                 if is_constrained && !valid_states[element.constraint_component as usize].contains(&state_to) {
                     // In a previous layer of the same component, this state was not possible. So even
@@ -137,7 +140,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                             // No choice made for the constraint component so far
                             let new_cstr = update_cstr_choice(ucomp, cstr, state_to + 1, nb_cstr_choice);
                             to_insert.push(((state_to, new_cstr), (state_from, cstr, cost)));
-                        } else if choice == state_to {
+                        } else if choice == state_to + 1 {
                             to_insert.push(((state_to, cstr), (state_from, cstr, cost)));
                         }
                     }
@@ -145,6 +148,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
 
                 let valid_state = to_insert.len() > 0;
                 for v in to_insert {
+                    updated = true;
                     let key = v.0;
                     let value = v.1;
                     let entry = self.table[idx].entry(key).or_insert((0, 0, f64::NEG_INFINITY));
@@ -152,10 +156,14 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                         *entry = value;
                     }
                 }
-
-                if !valid_state {
+                
+                if !valid_state && is_constrained {
                     valid_states[element.constraint_component as usize].remove(&state_to);
                 }
+            }
+
+            if !updated {
+                panic!("No valid states at time {} for element {:?}", idx, element);
             }
 
             // Let assume that we saw the last elements of Ci, every path of constraints
@@ -192,6 +200,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
             }
         }
 
+        self.objective = best_cost;
         let mut current = end_state.unwrap();
         for idx in (0..self.solution.len()).rev() {
             self.solution[idx] = current.0;

@@ -10,6 +10,7 @@ pub struct GlobalOpti<'a, const D: usize> {
     sequence: &'a SuperSequence<'a, D>,
     model: Model,
     solution: Array1<usize>,
+    pub objective: f64,
 }
 
 impl<'b, const D: usize> GlobalOpti<'b, D> {
@@ -19,7 +20,7 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
         //env.set(param::OutputFlag, 0).unwrap();
         let model = Model::new("model", &env).unwrap();
         let solution = Array1::from_elem(sequence.len(), 0);
-        Self {hmm, sequence, model, solution}
+        Self {hmm, sequence, model, solution, objective: 0.0}
     }
 
     fn add_var(&mut self, p: f64, idx: usize, state_from: usize, state_to: usize) -> Var {
@@ -152,6 +153,7 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
     pub fn solve(&mut self) -> u128 {
         let start = Instant::now();
         self.model.optimize().unwrap();
+        self.objective = self.model.get(attr::ObjVal).unwrap();
         start.elapsed().as_millis()
     }
 

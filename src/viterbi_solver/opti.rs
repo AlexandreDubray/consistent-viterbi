@@ -27,7 +27,7 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
         self.model.add_var(&name, Binary, p, 0.0, 1.0, &[], &[]).unwrap()
     }
 
-    fn compute_outflow(&mut self, state_from: usize, idx: i32, inflow_cache: &mut Vec<Option<LinExpr>>) -> LinExpr {
+    fn compute_outflow(&mut self, state_from: usize, idx: i32, inflow_cache: &mut Vec<Option<LinExpr>>, layer_edges: &mut Vec<Var>) -> LinExpr {
         let mut outflow = LinExpr::new();
         let n_idx = (idx + 1) as usize;
         for other_state in 0..self.hmm.nstates() {
@@ -35,6 +35,7 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
             let arc_p = next_elem.arc_p(self.hmm, state_from, other_state);
             if arc_p > f64::NEG_INFINITY {
                 let arc = self.add_var(arc_p, n_idx, state_from, other_state);
+                layer_edges.push(arc.clone());
                 outflow += arc.clone();
                 match &mut inflow_cache[other_state] {
                     Some(f) => {
@@ -51,6 +52,15 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
         outflow
     }
 
+    fn get_sum_layer(&self, v: &mut Vec<Var>) -> LinExpr {
+        let mut s = LinExpr::new();
+        while !v.is_empty() {
+            let edge = v.pop().unwrap();
+            s += edge;
+        }
+        s
+    }
+
     pub fn build_model(&mut self) {
 
         let mut cstr_inflow_cache: Vec<Vec<Option<LinExpr>>> = (0..self.sequence.nb_cstr).map(|_| -> Vec<Option<LinExpr>> {
@@ -59,8 +69,11 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
         let mut inflow_cache: Vec<Option<LinExpr>> = (0..self.hmm.nstates()).map(|_| None).collect();
         let mut inflow_tmp: Vec<Option<LinExpr>> = (0..self.hmm.nstates()).map(|_| None).collect();
 
-        let source_flow = self.compute_outflow(0, -1, &mut inflow_cache);
+        let mut edge_layer: Vec<Var> = Vec::new();
+        let source_flow = self.compute_outflow(0, -1, &mut inflow_cache, &mut edge_layer);
         self.model.add_constr("", source_flow, Equal, 1.0).unwrap();
+        let c = self.get_sum_layer(&mut edge_layer);
+        self.model.add_constr("", c, Equal, 1.0).unwrap();
         let mut target_flow = LinExpr::new();
 
 
@@ -93,13 +106,15 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
                                     None => cstr_inflow_cache[ucomp][state] = Some(inflow.clone())
                                 };
                             }
-                            let outflow = self.compute_outflow(state, idx as i32, &mut inflow_cache);
+                            let outflow = self.compute_outflow(state, idx as i32, &mut inflow_cache, &mut edge_layer);
                             let diff_flow = (*inflow).clone() - outflow;
                             self.model.add_constr("", diff_flow, Equal, 0.0).unwrap();
                         },
                         None => ()
                     }
                 }
+                let c = self.get_sum_layer(&mut edge_layer);
+                self.model.add_constr("", c, Equal, 1.0).unwrap();
             } else {
                 for state in 0..self.hmm.nstates() {
                     match &inflow_cache[state] {

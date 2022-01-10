@@ -29,6 +29,7 @@ pub fn load_sequences<const D: usize>(path: &PathBuf) -> Vec<Vec<[usize; D]>> {
         }
         cur_seq.push(element);
     }
+    ret.push(cur_seq);
     ret
 }
 
@@ -54,5 +55,6 @@ pub fn load_tags(path: &PathBuf) -> Vec<Vec<TTAG>> {
         current.push(v);
         last_id = tid;
     }
+    ret.push(current);
     ret
 }

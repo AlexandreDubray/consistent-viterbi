@@ -19,6 +19,7 @@ use viterbi_solver::dp::DPSolver;
 use viterbi_solver::utils::SuperSequence;
 use viterbi_solver::viterbi::decode;
 use viterbi_solver::constraints::Constraints;
+use viterbi_solver::cp::CPSolver;
 
 
 fn global_opti<const D: usize>(hmm: &HMM<D>, sequence: &mut SuperSequence<D>, tags: &Vec<Vec<Option<usize>>>) -> (Array1<Array1<usize>>, f64) {
@@ -43,6 +44,31 @@ fn dp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a mut SuperSequence<'a, D
     let error_rate = error_rate(&solution, tags);
     println!("Error rate is {:5} in {} secs", error_rate, elapsed);
     (solution, solver.objective)
+}
+
+fn cp<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a SuperSequence<'a, D>, tags: &Vec<Vec<Option<usize>>>) -> (Array1<Array1<usize>>, f64) {
+    let mut constraints: Vec<Vec<usize>> = Vec::new();
+    let mut m: Array1<i32> = Array1::from_elem(sequence.nb_cstr, -1);
+    for t in 0..sequence.len() {
+        if sequence[t].is_constrained() {
+            let ucomp = sequence[t].constraint_component as usize;
+            if m[ucomp] == -1 {
+                m[ucomp] = constraints.len() as i32;
+                constraints.push(Vec::new());
+            }
+            constraints[m[ucomp] as usize].push(t);
+        }
+    }
+    println!("Number of constrained: {}", constraints.len());
+    let mut solver = CPSolver::new(hmm, sequence, &constraints);
+    let start = Instant::now();
+    solver.solve();
+    let elapsed = start.elapsed().as_secs();
+    print!("CP solver solved in {} seconds", elapsed);
+    let solution = sequence.parse_solution(solver.get_solution());
+    let objective = solver.get_objective();
+    (solution, objective)
+
 }
 
 fn error_rate(predictions: &Array1<Array1<usize>>, truth: &Vec<Vec<Option<usize>>>) -> f64 {
@@ -126,12 +152,6 @@ fn main() {
             .about("Propostion of constraints to include when decoding")
             .required(true)
             .takes_value(true))
-        .arg(Arg::new("TRAIN")
-            .short('t')
-            .long("train")
-            .about("Train the Hidden Markov Model")
-            .takes_value(false)
-            .required(false))
         .get_matches();
 
     let input_path = PathBuf::from(matches.value_of("INPUT").unwrap());
@@ -151,20 +171,14 @@ fn main() {
     let mut constraints = Constraints::from_tags(&control_tags, 4);
     constraints.keep_prop(prop);
 
-    let hmm = match matches.occurrences_of("t") {
-        0 => HMM::from_json(&mut output_path),
-        1 | _ => {
-            let mut h = HMM::new(nstates, [nobs[0], nobs[1]]);
-            h.train(&sequences, &tags, 100, 0.01);
-            h.write(&mut output_path);
-            h
-        }
-    };
+    let hmm = HMM::from_json(&mut output_path);
 
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
+    super_seq.reorder();
     super_seq.recompute_constraints(prop);
-    let (solution, objective) = global_opti(&hmm, &mut super_seq, &control_tags);
+    //let (solution, objective) = global_opti(&hmm, &mut super_seq, &control_tags);
     //let (solution, objective) = dp(&hmm, &mut super_seq, &control_tags);
+    let (solution, objective) = cp(&hmm, &mut super_seq, &control_tags);
 
     output_path.set_file_name(format!("solution_{}", prop));
     let mut file = File::create(&output_path).unwrap();

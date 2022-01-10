@@ -212,6 +212,11 @@ impl<const D: usize> HMM<D> {
         self.pi[state] + self.b[state][&obs[..]]
     }
 
+    pub fn init_probs(&self, obs: [usize; D]) -> Array1<f64> {
+        let badd = self.b.map(|row| row[&obs[..]]);
+        &self.pi + &badd
+    }
+
     pub fn transition_prob(&self, state_from: usize, state_to: usize, obs: [usize; D]) -> f64 {
         self.a[[state_from, state_to]] + self.b[state_to][&obs[..]]
     }
@@ -222,6 +227,10 @@ impl<const D: usize> HMM<D> {
 
     pub fn emit_prob(&self, state: usize, obs: [usize; D]) -> f64 {
         self.b[state][&obs[..]]
+    }
+
+    pub fn emit_probs(&self, obs: [usize; D]) -> Array1<f64> {
+        self.b.map(|row| row[&obs[..]])
     }
 
     pub fn write(&self, opath: &mut PathBuf) {

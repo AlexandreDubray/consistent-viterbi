@@ -35,6 +35,10 @@ impl<const D: usize> MetaElements<D> {
     pub fn can_be_emited(&self, hmm: &HMM<D>, state: usize) -> bool {
         hmm.emit_prob(state, self.value) > f64::NEG_INFINITY
     }
+
+    pub fn is_constrained(&self) -> bool {
+        self.constraint_component != -1
+    }
 }
 
 pub struct SuperSequence<'a, const D: usize> {

@@ -1,37 +1,33 @@
 use ndarray::Array1;
 use std::collections::{HashSet, HashMap};
 
+use super::Solver;
 use super::super::hmm::hmm::HMM;
 use super::utils::SuperSequence;
 
 fn get_cstr_choice(uid: usize, cstr_id: usize, c: usize) -> usize {
-    // bad
-    // (uid / c.pow(cstr_id as u32)) % c
-    // Good
     (cstr_id / c.pow(uid as u32)) % c
 }
 
 fn update_cstr_choice(uid: usize, cstr_id: usize, choice: usize, c: usize) -> usize {
     let current_choice = get_cstr_choice(uid, cstr_id, c);
     assert!(current_choice == 0);
-    // bad
-    //uid + c.pow(choice as u32)
     cstr_id + choice*c.pow(uid as u32)
 }
 
 
 pub struct DPSolver<'a, const D: usize> {
-    pub solution: Array1<usize>,
+    solution: Array1<usize>,
     hmm: &'a HMM<D>,
-    sequence: &'a mut SuperSequence<'a, D>,
+    sequence: &'a SuperSequence<'a, D>,
     table: Array1<HashMap<(usize, usize), (usize, usize, f64)>>,
-    pub objective: f64
+    objective: f64
 }
 
 
 impl<'b, const D: usize> DPSolver<'b, D> {
 
-    pub fn new(hmm: &'b HMM<D>, sequence: &'b mut SuperSequence<'b, D>) -> Self {
+    pub fn new(hmm: &'b HMM<D>, sequence: &'b SuperSequence<'b, D>) -> Self {
         let solution = Array1::from_elem(sequence.len(), 0);
         let table: Array1<HashMap<(usize, usize), (usize, usize, f64)>> = Array1::from_elem(sequence.len(), HashMap::new());
         Self {solution, hmm, sequence, table, objective: 0.0}
@@ -47,7 +43,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
                 let (s2, cstr2) = keys[j];
                 if s1 == s2 {
                     let mut same = true;
-                    for k in 0..self.sequence.nb_cstr {
+                    for k in 0..self.sequence.number_constraints() {
                         if !finished_constraints[k] {
                             same = get_cstr_choice(*cstr1, k, c) == get_cstr_choice(*cstr2, k, c);
                             if !same { break; }
@@ -72,13 +68,36 @@ impl<'b, const D: usize> DPSolver<'b, D> {
         }
     }
 
-    pub fn dp_solving(&mut self) {
+    pub fn backtrack(&mut self) {
+        let mut end_state: Option<(usize, usize)> = None;
+        let mut best_cost = f64::NEG_INFINITY;
+        for (key, val) in self.table[self.sequence.len()-1].iter() {
+            let cost = val.2;
+            if cost > best_cost {
+                end_state = Some(*key);
+                best_cost = cost;
+            }
+        }
+
+        self.objective = best_cost;
+        let mut current = end_state.unwrap();
+        for idx in (0..self.solution.len()).rev() {
+            self.solution[idx] = current.0;
+            let from = self.table[idx].get(&current).unwrap();
+            current = (from.0, from.1);
+        }
+    }
+}
+
+impl<'a, const D: usize>Solver for DPSolver<'a, D> {
+
+    fn solve(&mut self) {
         // There are nstates but the fact that a component has no assigned state is represented by
         // 0, thus we need nstates + 1 integers
         let nb_cstr_choice = self.hmm.nstates() + 1;
 
-        let mut finished_constraints: Vec<bool> = (0..self.sequence.nb_cstr).map(|_| false).collect();
-        let mut valid_states: Vec<HashSet<usize>> = (0..self.sequence.nb_cstr).map(|_| (0..self.hmm.nstates()).collect()).collect();
+        let mut finished_constraints: Vec<bool> = (0..self.sequence.number_constraints()).map(|_| false).collect();
+        let mut valid_states: Vec<HashSet<usize>> = (0..self.sequence.number_constraints()).map(|_| (0..self.hmm.nstates()).collect()).collect();
 
         {
             let mut to_insert: Vec<((usize, usize), (usize, usize, f64))> = Vec::new();
@@ -107,7 +126,7 @@ impl<'b, const D: usize> DPSolver<'b, D> {
 
         for idx in 1.. self.sequence.len() {
             let element = &self.sequence[idx];
-            let is_constrained = self.sequence.is_constrained(idx);
+            let is_constrained = element.is_constrained();
 
             let mut updated = false;
             for state_to in 0..self.hmm.nstates() {
@@ -189,35 +208,9 @@ impl<'b, const D: usize> DPSolver<'b, D> {
         self.backtrack();
     }
 
-    pub fn backtrack(&mut self) {
-        let mut end_state: Option<(usize, usize)> = None;
-        let mut best_cost = f64::NEG_INFINITY;
-        for (key, val) in self.table[self.sequence.len()-1].iter() {
-            let cost = val.2;
-            if cost > best_cost {
-                end_state = Some(*key);
-                best_cost = cost;
-            }
-        }
+    fn get_solution(&self) -> &Array1<usize> { &self.solution }
 
-        self.objective = best_cost;
-        let mut current = end_state.unwrap();
-        for idx in (0..self.solution.len()).rev() {
-            self.solution[idx] = current.0;
-            let from = self.table[idx].get(&current).unwrap();
-            current = (from.0, from.1);
-        }
-    }
+    fn get_objective(&self) -> f64 { self.objective }
 
-    pub fn parse_solution(&self) -> Array1<Array1<usize>> {
-        self.sequence.parse_solution(&self.solution)
-    }
-
-    pub fn refresh_constraints(&mut self, proportion: f64) {
-        self.sequence.recompute_constraints(proportion);
-    }
-
-    pub fn reorder(&mut self) {
-        self.sequence.reorder();
-    }
+    fn get_name(&self) -> String { String::from("dp") }
 }

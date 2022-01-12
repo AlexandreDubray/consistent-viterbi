@@ -1,110 +1,70 @@
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::fs::File;
-use std::collections::HashMap;
-use ndarray::Array1;
-
-use rand::prelude::*;
-
+use std::collections::HashSet;
 
 pub struct Constraints {
-    pub components: Vec<Vec<(usize, usize)>>,
-    pub last_elements: Vec<(usize, usize)>,
-    pub first_element_pos: Vec<usize>,
-    full_components: Vec<Vec<(usize, usize)>>,
-    map_elem_comp_id: HashMap<(usize, usize), usize>,
+    pub components: Vec<HashSet<(usize, usize)>>,
 }
 
 impl Constraints {
 
-    fn parse_usize(s: &str) -> usize {
-        match s.parse::<usize>() {
-            Ok(v) => v,
-            Err(error) => panic!("Can not parse {} as usize: {:?}", s, error)
-        }
-    }
-
     pub fn from_file(path: &PathBuf) -> Self {
         let file = File::open(path).unwrap();
         let reader = BufReader::new(file);
+
         // Each component is separated by an empty line
-        let mut component: Vec<(usize, usize)> = Vec::new();
+        let mut component: HashSet<(usize, usize)> = HashSet::new();
         
-        let mut full_components: Vec<Vec<(usize, usize)>> = Vec::new();
+        let mut components: Vec<HashSet<(usize, usize)>> = Vec::new();
         for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(error) => panic!("Error while reading file at line {:?}", error),
-            };
+            let line = line.unwrap();
             if line == "" {
                 if component.len() > 1 {
-                    full_components.push(component);
+                    components.push(component);
                 }
-                component = Vec::new();
+                component = HashSet::new();
             } else {
                 let mut split = line.split_whitespace();
-                let seq_id = Constraints::parse_usize(split.next().unwrap());
-                let timestamp = Constraints::parse_usize(split.next().unwrap());
-                component.push((seq_id, timestamp));
+                let seq_id = split.next().unwrap().parse::<usize>().unwrap();
+                let timestamp = split.next().unwrap().parse::<usize>().unwrap();
+                component.insert((seq_id, timestamp));
             }
         }
         if component.len() > 1 {
-            full_components.push(component);
+            components.push(component);
         }
-        let components: Vec<Vec<(usize, usize)>> = Vec::new();
-        let map_elem_comp_id: HashMap<(usize, usize), usize> = HashMap::new();
-        let last_elements: Vec<(usize, usize)> = Vec::new();
-        let first_element_pos: Vec<usize> = Vec::new();
-        Self {components, last_elements, first_element_pos, full_components, map_elem_comp_id}
+        Self {components}
     }
 
-    pub fn from_tags(truth: &Vec<Vec<Option<usize>>>, ncomponents: usize) -> Self {
-        let mut full_components: Vec<Vec<(usize, usize)>> = (0..ncomponents).map(|_| Vec::new()).collect();
+    pub fn from_tags(truth: &Vec<Vec<Option<usize>>>) -> Self {
+        let mut comp_value: Vec<usize> = Vec::new();
+        let mut components: Vec<HashSet<(usize, usize)>> = Vec::new();
         for seq_id in 0..truth.len() {
             let tags = &truth[seq_id];
             for t in 0..tags.len() {
                 if let Some(tag) = tags[t] {
-                    full_components[tag].push((seq_id, t));
+                    let mut comp_id: Option<usize> = None;
+                    for i in 0..comp_value.len() {
+                        if comp_value[i] == tag {
+                            comp_id = Some(i);
+                            break;
+                        }
+                    }
+                    match comp_id {
+                        Some(id) => {
+                            components[id].insert((seq_id, t));
+                        }
+                        None => {
+                            comp_value.push(tag);
+                            components.push(HashSet::new());
+                            let id = components.len()-1;
+                            components[id].insert((seq_id, t));
+                        }
+                    };
                 }
             }
         }
-
-        let components: Vec<Vec<(usize, usize)>> = Vec::new();
-        let map_elem_comp_id: HashMap<(usize, usize), usize> = HashMap::new();
-        let last_elements: Vec<(usize, usize)> = Vec::new();
-        let first_element_pos: Vec<usize> = Vec::new();
-        Self {components, last_elements, first_element_pos, full_components, map_elem_comp_id}
-    }
-
-    pub fn keep_prop(&mut self, prop: f64) {
-        self.components.clear();
-        self.last_elements.clear();
-        self.map_elem_comp_id.clear();
-
-        let mut rng = thread_rng();
-        let mut current_comp: Vec<(usize, usize)> = Vec::new();
-        for i in 0..self.full_components.len() {
-            for elem in &self.full_components[i] {
-                if rng.gen::<f64>() < prop {
-                    current_comp.push(*elem);
-                    self.map_elem_comp_id.insert(*elem, self.components.len());
-                }
-            }
-            if current_comp.len() > 1 {
-                self.last_elements.push(*current_comp.last().unwrap());
-                self.first_element_pos.push(current_comp.first().unwrap().0);
-                self.components.push(current_comp);
-                current_comp = Vec::new();
-            } else if current_comp.len() == 1 {
-                self.map_elem_comp_id.remove(&current_comp[0]);
-            }
-        }
-    }
-
-    pub fn get_comp_id(&self, seq_id: usize, time: usize) -> i32 {
-        match self.map_elem_comp_id.get(&(seq_id, time)) {
-            Some(x) => *x as i32,
-            None => -1
-        }
+        Self {components}
     }
 }

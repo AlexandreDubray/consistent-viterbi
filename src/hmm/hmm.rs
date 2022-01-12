@@ -239,8 +239,7 @@ impl<const D: usize> HMM<D> {
         write(opath, serialized).unwrap();
     }
 
-    pub fn from_json(ipath: &mut PathBuf) -> Self {
-        ipath.set_file_name("hmm.json");
+    pub fn from_json(ipath: &PathBuf) -> Self {
         let serialized = read_to_string(ipath).unwrap();
         serde_json::from_str(&serialized).unwrap()
     }

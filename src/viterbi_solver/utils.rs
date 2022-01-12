@@ -1,27 +1,24 @@
 use super::super::hmm::hmm::HMM;
 use super::constraints::Constraints;
 use ndarray::prelude::*;
+use rand::prelude::*;
 
 use std::ops::Index;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct MetaElements<const D: usize> {
     pub seq: usize,
     pub t: usize,
     pub value: [usize; D],
     pub constraint_component: i32,
+    active_cstr: bool,
     pub last_of_constraint: bool,
-    pub previous_idx_cstr: Option<usize>
 }
 
 impl<const D: usize> MetaElements<D> {
 
-    pub fn new(seq: usize, t: usize, value: [usize; D], constraint_component: i32, last_of_constraint: bool, previous_idx_cstr: Option<usize>) -> Self {
-        Self { seq, t, value, constraint_component, last_of_constraint, previous_idx_cstr}
-    }
-
-    pub fn empty() -> Self {
-        Self { seq: 0, t: 0, value: [0; D], constraint_component: 0, last_of_constraint: false, previous_idx_cstr: None}
+    pub fn new(seq: usize, t: usize, value: [usize; D], constraint_component: i32, active_cstr: bool, last_of_constraint: bool) -> Self {
+        Self { seq, t, value, constraint_component, active_cstr, last_of_constraint}
     }
 
     pub fn arc_p(&self, hmm: &HMM<D>, state_from: usize, state: usize) -> f64 {
@@ -32,62 +29,99 @@ impl<const D: usize> MetaElements<D> {
         }
     }
 
+    pub fn transitions(&self, hmm: &HMM<D>, state: usize) -> Array1<f64> {
+        if self.t == 0 {
+            Array1::from_elem(hmm.nstates(), hmm.pi[state])
+        } else {
+            Array1::from_shape_fn(hmm.nstates(), |s| hmm.a[[s, state]])
+        }
+    }
+
     pub fn can_be_emited(&self, hmm: &HMM<D>, state: usize) -> bool {
         hmm.emit_prob(state, self.value) > f64::NEG_INFINITY
     }
 
     pub fn is_constrained(&self) -> bool {
-        self.constraint_component != -1
+        self.active_cstr
     }
 }
 
 pub struct SuperSequence<'a, const D: usize> {
     sequences: &'a Vec<Vec<[usize; D]>>,
     hmm: &'a HMM<D>,
-    constraints: &'a mut Constraints,
+    constraints: &'a Constraints,
     elements: Array1<MetaElements<D>>,
-    pub nb_cstr: usize,
-    pub nb_seqs: usize,
-    pub first_pos_cstr: Array1<usize>,
-    orig_seq_sizes: Array1<usize>,
-    pub active_constraints: Array1<bool>
+    super_seq_start: Vec<usize>,
+    orig_seq_sizes: Vec<usize>,
+    rng: StdRng,
+    nb_active_cstr: usize,
 }
 
 impl<'b, const D: usize> SuperSequence<'b, D> {
 
-    pub fn from(sequences: &'b Vec<Vec<[usize; D]>>, constraints: &'b mut Constraints, hmm: &'b HMM<D>) -> Self {
+    pub fn from(sequences: &'b Vec<Vec<[usize; D]>>, constraints: &'b Constraints, hmm: &'b HMM<D>) -> Self {
         let size: usize = (0..sequences.len()).map(|x| sequences[x].len()).sum();
-        let nb_cstr = constraints.components.len();
-        let nb_seqs = sequences.len();
-
-        let elements: Array1<MetaElements<D>> = (0..size).map(|_| MetaElements::empty()).collect();
-        let first_pos_cstr = Array1::from_elem(1, 0);
-
+        let mut super_seq_start: Vec<usize> = (0..sequences.len()).collect();
+        let mut cur_seq = 0;
+        let mut cur_t = 0;
+        let mut elements: Array1<MetaElements<D>> = (0..size).map(|t| {
+            let v = sequences[cur_seq][cur_t];
+            let mut cstr = -1;
+            for comp_id in 0..constraints.components.len() {
+                if constraints.components[comp_id].contains(&(cur_seq, cur_t)) {
+                    cstr = comp_id as i32;
+                    break;
+                }
+            }
+            let cstr_active = if cstr == -1 { false } else { true };
+            let e = MetaElements::new(cur_seq, cur_t, v, cstr, cstr_active, false);
+            cur_t += 1;
+            if cur_t == sequences[cur_seq].len() {
+                cur_seq += 1;
+                if cur_seq != sequences.len() {
+                    super_seq_start[cur_seq] = t + 1;
+                }
+                cur_t = 0;
+            }
+            e
+        }).collect();
+        let mut seen = Array1::from_elem(constraints.components.len(), false);
+        let mut nb_active_cstr = 0;
+        for t in (0..elements.len()).rev() {
+            if elements[t].is_constrained() {
+                let ucomp = elements[t].constraint_component as usize;
+                if !seen[ucomp] {
+                    nb_active_cstr += 1;
+                    seen[ucomp] = true;
+                    elements[t].last_of_constraint = true;
+                }
+            }
+        }
         let orig_seq_sizes = (0..sequences.len()).map(|seq_id| sequences[seq_id].len()).collect();
-        let active_constraints = Array1::from_elem(nb_cstr, true);
-        Self { sequences, hmm, constraints, elements , nb_cstr, nb_seqs, first_pos_cstr, orig_seq_sizes, active_constraints }
+        let rng = StdRng::seed_from_u64(3019);
+        Self { sequences, hmm, constraints, elements , super_seq_start, orig_seq_sizes, rng, nb_active_cstr}
     }
 
     fn get_sequences_ordering(&self) -> Vec<usize> {
         type OrderingReturn = (usize, f64, usize);
-        let mut nb_unconstrained = 0;
-        let mut nb_elem_cstr: Vec<OrderingReturn> = (0..self.sequences.len()).map(|seq_id| -> OrderingReturn {
+        let mut nb_elem_cstr: Vec<OrderingReturn> = (0..self.super_seq_start.len()).map(|seq_id| {
+            let start = self.super_seq_start[seq_id];
+            let size = self.orig_seq_sizes[seq_id];
             let mut possible_states = 0.0;
             let mut is_constrained = false;
-            for t in 0..self.sequences[seq_id].len() {
-                let comp_id = self.constraints.get_comp_id(seq_id, t);
-                is_constrained |= comp_id != -1 && self.active_constraints[comp_id as usize];
+            for t in start..(start + size) {
+                is_constrained = self.elements[t].is_constrained();
                 for state in 0..self.hmm.nstates() {
-                    if self.hmm.emit_prob(state, self.sequences[seq_id][t]) > f64::NEG_INFINITY {
+                    if self.hmm.emit_prob(state, self.elements[t].value) > f64::NEG_INFINITY {
                         possible_states += 1.0;
                     }
                 }
             }
-            let average_state = possible_states / self.sequences[seq_id].len() as f64;
-            let cstr_weight = if is_constrained { 1 } else { nb_unconstrained += 1; 0 };
+            let average_state = possible_states / size as f64;
+            let cstr_weight = if is_constrained { 1 } else { 0 };
             (cstr_weight, average_state, seq_id)
         }).collect();
-        println!("Number of unconstrained sequences {} (out of {})", nb_unconstrained, self.sequences.len());
+
         nb_elem_cstr.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let mut first_idx_cstr = -1;
         let mut idx = 0;
@@ -101,59 +135,44 @@ impl<'b, const D: usize> SuperSequence<'b, D> {
         ret
     }
 
-    pub fn reorder(&mut self) {
+    fn reorder(&mut self) {
         let ordering = self.get_sequences_ordering();
-        let mut last_seen_cstr: Array1<Option<usize>> = Array1::from_elem(self.nb_cstr, None);
-        self.first_pos_cstr = Array1::from_elem(self.nb_cstr, 0);
+        let mut new_elements = Array1::from_shape_fn(self.elements.len(), |idx| self.elements[idx]);
         let mut idx = 0;
         for seq_id in ordering {
-            let sequence = &self.sequences[seq_id];
-            for t in 0..sequence.len() {
-                let comp_id = self.constraints.get_comp_id(seq_id, t);
-                let elem = &mut self.elements[idx];
-                if comp_id != -1 && self.active_constraints[comp_id as usize] {
-                    let ucomp = comp_id as usize;
-                    match last_seen_cstr[ucomp] {
-                        None => {
-                            self.first_pos_cstr[ucomp] = idx;
-                            elem.previous_idx_cstr = None;
-                        },
-                        Some(prev_idx) => {
-                            elem.previous_idx_cstr = Some(prev_idx);
-                        }
-                    };
-                    last_seen_cstr[ucomp] = Some(idx);
-                }
-                elem.seq = seq_id;
-                elem.t = t;
-                elem.value = sequence[t];
-                elem.constraint_component = comp_id;
+            let start = self.super_seq_start[seq_id];
+            self.super_seq_start[seq_id] = idx;
+            let size = self.orig_seq_sizes[seq_id];
+            for t in start..(start+size) {
+                new_elements[idx] = self.elements[t];
                 idx += 1;
             }
         }
+        let mut seen = Array1::from_elem(self.constraints.components.len(), false);
+        self.nb_active_cstr = 0;
+        for t in (0..new_elements.len()).rev() {
+            if new_elements[t].is_constrained() {
+                let ucomp = new_elements[t].constraint_component as usize;
+                if !seen[ucomp] {
+                    self.nb_active_cstr += 1;
+                    seen[ucomp] = true;
+                    new_elements[t].last_of_constraint = true;
+                }
+            }
+        }
+        self.elements = new_elements;
     }
 
 
     pub fn recompute_constraints(&mut self, proportion: f64) {
-        self.constraints.keep_prop(proportion);
-        self.nb_cstr = self.constraints.components.len();
-        self.active_constraints = Array1::from_elem(self.nb_cstr, true);
-        let mut first_pos_cstr = Array1::from_elem(self.nb_cstr, 0);
-        let mut seen = Array1::from_elem(self.nb_cstr, false);
-        let length = self.elements.len();
-        for t in 0..length {
-            let element = &mut self.elements[t];
-            element.constraint_component = self.constraints.get_comp_id(element.seq, element.t);
-            if element.constraint_component != -1 {
-                let ucomp = element.constraint_component as usize;
-                if !seen[ucomp] {
-                    seen[ucomp] = true;
-                    first_pos_cstr[ucomp] = t;
-                }
+        for t in 0..self.len() {
+            if self.elements[t].constraint_component != -1 && self.rng.gen::<f64>() <= proportion {
+                self.elements[t].active_cstr = true;
+            } else {
+                self.elements[t].active_cstr = false;
             }
         }
-        self.first_pos_cstr = first_pos_cstr;
-        self.active_constraints = Array1::from_elem(self.nb_cstr, true);
+        self.reorder();
     }
 
     pub fn len(&self) -> usize {
@@ -169,25 +188,16 @@ impl<'b, const D: usize> SuperSequence<'b, D> {
         sol
     }
 
-    pub fn deactive_constraints(&mut self) {
-        self.active_constraints.fill(false);
-    }
-
-    pub fn activate_constraints(&mut self) {
-        self.active_constraints.fill(true);
-    }
-
-    pub fn activate_constraint(&mut self, comp_id: usize) {
-        self.active_constraints[comp_id] = true;
-    }
-
     pub fn is_constrained(&self, idx: usize) -> bool {
-        let element = &self.elements[idx];
-        element.constraint_component != -1 && self.active_constraints[element.constraint_component as usize]
+        self.elements[idx].constraint_component != -1
     }
 
     pub fn constraint_size(&self, comp_id: usize) -> usize {
         self.constraints.components[comp_id].len()
+    }
+    
+    pub fn number_constraints(&self) -> usize {
+        self.nb_active_cstr
     }
 }
 

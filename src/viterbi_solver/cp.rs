@@ -3,19 +3,28 @@ use super::super::hmm::hmm::HMM;
 use super::utils::SuperSequence;
 use ndarray_stats::QuantileExt;
 
+use super::Solver;
+
 pub struct CPSolver<'a, const D: usize> {
     hmm: &'a HMM<D>,
     sequence: &'a SuperSequence<'a, D>,
-    constraints: &'a Vec<Vec<usize>>,
+    constraints: Vec<Vec<usize>>,
     best_obj: f64,
     best_sol: Array1<usize>
 }
 
 impl<'a, const D: usize> CPSolver<'a, D> {
 
-    pub fn new(hmm: &'a HMM<D>, sequence: &'a SuperSequence<'a, D>, constraints: &'a Vec<Vec<usize>>) -> Self {
+    pub fn new(hmm: &'a HMM<D>, sequence: &'a SuperSequence<'a, D>) -> Self {
         // constraints is a vector of the consistency components. They are ordered by appearance in
         // the super-sequence. Each constraints is also ordered.
+        let mut constraints: Vec<Vec<usize>> = (0..sequence.number_constraints()).map(|_| Vec::new()).collect();
+        for t in 0..sequence.len() {
+            if sequence[t].is_constrained() {
+                let ucomp = sequence[t].constraint_component as usize;
+                constraints[ucomp].push(t);
+            }
+        }
         Self {hmm, sequence, constraints, best_obj: f64::NEG_INFINITY, best_sol: Array1::from_elem(sequence.len(), 0)}
     }
 
@@ -112,19 +121,24 @@ impl<'a, const D: usize> CPSolver<'a, D> {
             }
         }
     }
+}
 
-    pub fn solve(&mut self) {
+impl<'a, const D: usize> Solver for CPSolver<'a, D> {
+
+    fn solve(&mut self) {
         let mut array = Array2::from_elem((self.sequence.len(), self.hmm.nstates()), 0.0);
         let mut bt = Array2::from_elem((self.sequence.len(), self.hmm.nstates()), 0);
         let mut forced: Array1<Option<usize>> = Array1::from_elem(self.sequence.len(), None);
-        let e = if self.constraints.len() > 0 { self.constraints[0][0] } else { self.sequence.len() };
+        let e = if self.sequence.number_constraints() > 0 { self.constraints[0][0] } else { self.sequence.len() };
         self.partial_viterbi(&mut array, &mut bt, 0, e, &mut forced);
         self.solve_r(&mut array, &mut bt, 0, &mut forced);
     }
 
-    pub fn get_solution(&self) -> &Array1<usize> {
+    fn get_solution(&self) -> &Array1<usize> {
         &self.best_sol
     }
     
-    pub fn get_objective(&self) -> f64 { self.best_obj }
+    fn get_objective(&self) -> f64 { self.best_obj }
+
+    fn get_name(&self) -> String { String::from("cp") }
 }

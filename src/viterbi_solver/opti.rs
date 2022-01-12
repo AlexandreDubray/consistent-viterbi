@@ -1,26 +1,28 @@
 use gurobi::*;
 use ndarray::Array1;
-use std::time::Instant;
 
+use super::Solver;
 use super::super::hmm::hmm::HMM;
 use super::utils::SuperSequence;
 
-pub struct GlobalOpti<'a, const D: usize> {
+pub struct IPSolver<'a, const D: usize> {
     hmm: &'a HMM<D>,
     sequence: &'a SuperSequence<'a, D>,
     model: Model,
     solution: Array1<usize>,
-    pub objective: f64,
+    objective: f64,
 }
 
-impl<'b, const D: usize> GlobalOpti<'b, D> {
+impl<'b, const D: usize> IPSolver<'b, D> {
 
     pub fn new(hmm: &'b HMM<D>, sequence: &'b SuperSequence<D>) -> Self {
         let mut env = Env::new("logfile.log").unwrap();
         //env.set(param::OutputFlag, 0).unwrap();
         let model = Model::new("model", &env).unwrap();
         let solution = Array1::from_elem(sequence.len(), 0);
-        Self {hmm, sequence, model, solution, objective: 0.0}
+        let mut solver = Self {hmm, sequence, model, solution, objective: 0.0};
+        solver.build_model();
+        solver
     }
 
     fn add_var(&mut self, p: f64, idx: usize, state_from: usize, state_to: usize) -> Var {
@@ -64,7 +66,7 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
 
     pub fn build_model(&mut self) {
 
-        let mut cstr_inflow_cache: Vec<Vec<Option<LinExpr>>> = (0..self.sequence.nb_cstr).map(|_| -> Vec<Option<LinExpr>> {
+        let mut cstr_inflow_cache: Vec<Vec<Option<LinExpr>>> = (0..self.sequence.number_constraints()).map(|_| -> Vec<Option<LinExpr>> {
             (0..self.hmm.nstates()).map(|_| None).collect()
         }).collect();
         let mut inflow_cache: Vec<Option<LinExpr>> = (0..self.hmm.nstates()).map(|_| None).collect();
@@ -83,7 +85,7 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
                 println!("{}/{}", idx+1, self.sequence.len());
             }
             let element = &self.sequence[idx];
-            let is_constrained = element.constraint_component != -1;
+            let is_constrained = element.is_constrained();
             if idx != self.sequence.len() - 1 {
                 for i in (0..self.hmm.nstates()).rev() {
                     inflow_tmp[i] = inflow_cache.remove(i);
@@ -150,13 +152,6 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
         self.model.set_objective(objective, Maximize).unwrap();
     }
 
-    pub fn solve(&mut self) -> u128 {
-        let start = Instant::now();
-        self.model.optimize().unwrap();
-        self.objective = self.model.get(attr::ObjVal).unwrap();
-        start.elapsed().as_millis()
-    }
-
     fn arc_from_name(&self, var: &Var) -> (usize, usize) {
         let name = &self.model.get_values(attr::VarName, &[var.clone()]).unwrap()[0];
         let mut split = name.split("-");
@@ -166,7 +161,13 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
         (idx, state_to)
     }
 
-    pub fn get_solutions(&mut self) -> &Array1<usize> {
+}
+
+impl<'a, const D: usize> Solver for IPSolver<'a, D> {
+
+    fn solve(&mut self) {
+        self.model.optimize().unwrap();
+        self.objective = self.model.get(attr::ObjVal).unwrap();
         for var in self.model.get_vars() {
             let value = self.model.get_values(attr::X, &[var.clone()]).unwrap()[0];
             if value == 1.0 {
@@ -177,6 +178,14 @@ impl<'b, const D: usize> GlobalOpti<'b, D> {
             }
 
         }
+    }
+
+    fn get_solution(&self) -> &Array1<usize> {
         &self.solution
     }
+
+    fn get_objective(&self) -> f64 { self.objective }
+
+    fn get_name(&self) -> String { String::from("ip") }
+
 }

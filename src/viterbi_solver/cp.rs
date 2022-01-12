@@ -10,14 +10,13 @@ pub struct CPSolver<'a, const D: usize> {
     sequence: &'a SuperSequence<'a, D>,
     constraints: Vec<Vec<usize>>,
     best_obj: f64,
-    best_sol: Array1<usize>
+    best_sol: Array1<usize>,
+    upper_bound_remaining: Array1<f64>
 }
 
 impl<'a, const D: usize> CPSolver<'a, D> {
 
     pub fn new(hmm: &'a HMM<D>, sequence: &'a SuperSequence<'a, D>) -> Self {
-        // constraints is a vector of the consistency components. They are ordered by appearance in
-        // the super-sequence. Each constraints is also ordered.
         let mut constraints: Vec<Vec<usize>> = (0..sequence.number_constraints()).map(|_| Vec::new()).collect();
         for t in 0..sequence.len() {
             if sequence[t].is_constrained() {
@@ -25,7 +24,8 @@ impl<'a, const D: usize> CPSolver<'a, D> {
                 constraints[ucomp].push(t);
             }
         }
-        Self {hmm, sequence, constraints, best_obj: f64::NEG_INFINITY, best_sol: Array1::from_elem(sequence.len(), 0)}
+        let upper_bound_remaining = Array1::from_elem(sequence.len(), 0.0);
+        Self {hmm, sequence, constraints, best_obj: f64::NEG_INFINITY, best_sol: Array1::from_elem(sequence.len(), 0), upper_bound_remaining}
     }
 
     fn partial_viterbi(&mut self, array: &mut Array2<f64>, bt: &mut Array2<usize>, start: usize, end: usize, forced: &Array1<Option<usize>>) -> bool {
@@ -64,7 +64,7 @@ impl<'a, const D: usize> CPSolver<'a, D> {
                             array[[t, state_to]] = f64::NEG_INFINITY;
                         }
                     }
-                    if upper_bound < self.best_obj {
+                    if upper_bound + self.upper_bound_remaining[t] < self.best_obj {
                         return false;
                     }
                 },
@@ -81,7 +81,7 @@ impl<'a, const D: usize> CPSolver<'a, D> {
                     array[[t, state]] = v;
                     bt[[t, state]] = state_from;
                     upper_bound = v;
-                    if upper_bound < self.best_obj {
+                    if upper_bound + self.upper_bound_remaining[t] < self.best_obj {
                         return false;
                     }
                 }
@@ -121,6 +121,16 @@ impl<'a, const D: usize> CPSolver<'a, D> {
             }
         }
     }
+
+    fn compute_upper_bound_remaining(&mut self, array: &mut Array2<f64>, bt: &mut Array2<usize>, forced: &mut Array1<Option<usize>>) {
+        self.partial_viterbi(array, bt, 0, self.sequence.len(), forced);
+        let mut current = array.row(self.sequence.len() - 1).argmax().unwrap();
+        let obj = array[[self.sequence.len()-1, current]];
+        for t in (0..self.sequence.len()).rev() {
+            self.upper_bound_remaining[t] = obj - array[[t, current]];
+            current = bt[[t, current]];
+        }
+    }
 }
 
 impl<'a, const D: usize> Solver for CPSolver<'a, D> {
@@ -129,6 +139,7 @@ impl<'a, const D: usize> Solver for CPSolver<'a, D> {
         let mut array = Array2::from_elem((self.sequence.len(), self.hmm.nstates()), 0.0);
         let mut bt = Array2::from_elem((self.sequence.len(), self.hmm.nstates()), 0);
         let mut forced: Array1<Option<usize>> = Array1::from_elem(self.sequence.len(), None);
+        self.compute_upper_bound_remaining(&mut array, &mut bt, &mut forced);
         let e = if self.sequence.number_constraints() > 0 { self.constraints[0][0] } else { self.sequence.len() };
         self.partial_viterbi(&mut array, &mut bt, 0, e, &mut forced);
         self.solve_r(&mut array, &mut bt, 0, &mut forced);

@@ -102,14 +102,14 @@ impl<'a, const D: usize>Solver for DPSolver<'a, D> {
         {
             let mut to_insert: Vec<((usize, usize), (usize, usize, f64))> = Vec::new();
             let first = &self.sequence[0];
+            let is_constrained = self.sequence[0].is_constrained();
             for state in 0..self.hmm.nstates() {
-                let is_constrained = self.sequence.is_constrained(0);
                 if !first.can_be_emited(self.hmm, state) { continue; }
                 let cost = first.arc_p(self.hmm, 0, state);
                 if cost > f64::NEG_INFINITY {
                     let cstr = if is_constrained {
                         let ucomp = first.constraint_component as usize;
-                        update_cstr_choice(0, ucomp, state, nb_cstr_choice)
+                        update_cstr_choice(0, ucomp, state + 1, nb_cstr_choice)
                     } else {
                         0
                     };
@@ -175,7 +175,7 @@ impl<'a, const D: usize>Solver for DPSolver<'a, D> {
                         *entry = value;
                     }
                 }
-                
+
                 if !valid_state && is_constrained {
                     valid_states[element.constraint_component as usize].remove(&state_to);
                 }

@@ -145,6 +145,7 @@ impl<'b, const D: usize> SuperSequence<'b, D> {
             let size = self.orig_seq_sizes[seq_id];
             for t in start..(start+size) {
                 new_elements[idx] = self.elements[t];
+                new_elements[idx].last_of_constraint = false;
                 idx += 1;
             }
         }

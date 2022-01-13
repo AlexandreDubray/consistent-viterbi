@@ -37,7 +37,7 @@ impl<'a, const D: usize> CPSolver<'a, D> {
                 },
                 Some(state) => {
                     array.row_mut(0).fill(f64::NEG_INFINITY);
-                    let p = self.hmm.init_prob(state, self.sequence[0].value);
+                    let p = self.sequence[0].arc_p(self.hmm, 0, state);
                     array[[0, state]] = p;
                 }
             };
@@ -64,28 +64,25 @@ impl<'a, const D: usize> CPSolver<'a, D> {
                             array[[t, state_to]] = f64::NEG_INFINITY;
                         }
                     }
-                    if upper_bound + self.upper_bound_remaining[t] < self.best_obj {
-                        return false;
-                    }
                 },
                 Some(state) => {
-                    array.row_mut(t).fill(f64::NEG_INFINITY);
                     if !self.sequence[t].can_be_emited(self.hmm, state) {
                         return false;
                     }
+                    array.row_mut(t).fill(f64::NEG_INFINITY);
                     let previous_prob = array.row(t-1);
-                    let transitions = self.hmm.transitions_to(state);
+                    let transitions = self.sequence[t].transitions(self.hmm, state);
                     let probs = &previous_prob + &transitions;
                     let state_from = probs.argmax().unwrap();
                     let v = previous_prob[state_from] + self.sequence[t].arc_p(self.hmm, state_from, state);
                     array[[t, state]] = v;
                     bt[[t, state]] = state_from;
                     upper_bound = v;
-                    if upper_bound + self.upper_bound_remaining[t] < self.best_obj {
-                        return false;
-                    }
                 }
             };
+            if upper_bound + self.upper_bound_remaining[t] < self.best_obj {
+                return false;
+            }
         }
         true
     }

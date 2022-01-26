@@ -27,7 +27,7 @@ impl<const D: usize> HMM<D> {
         Self { a, b, pi }
     }
 
-    pub fn maximum_likelihood_estimation(&mut self, sequences: &Vec<Vec<[usize; D]>>, tags: &Vec<Vec<usize>>) {
+    pub fn maximum_likelihood_estimation(&mut self, sequences: &Vec<Vec<[usize; D]>>, tags: &Vec<Vec<Option<usize>>>) {
         let nstates = self.a.nrows();
         let mut seen_states = Array1::<f64>::zeros(nstates);
         let mut end_states = Array1::<f64>::zeros(nstates);
@@ -36,15 +36,15 @@ impl<const D: usize> HMM<D> {
             let sequence = &sequences[i];
             let tag = &tags[i];
 
-            self.pi[tag[0]] += 1.0;
+            self.pi[tag[0].unwrap()] += 1.0;
             for t in 0..sequence.len() - 1 {
-                self.b[tag[t]][&sequence[t][..]] += 1.0;
-                self.a[[tag[t], tag[t+1]]] += 1.0;
-                seen_states[tag[t]] += 1.0;
+                self.b[tag[t].unwrap()][&sequence[t][..]] += 1.0;
+                self.a[[tag[t].unwrap(), tag[t+1].unwrap()]] += 1.0;
+                seen_states[tag[t].unwrap()] += 1.0;
             }
-            self.b[tag[sequence.len()-1]][&sequence[sequence.len()-1][..]] += 1.0;
-            seen_states[tag[sequence.len()-1]] += 1.0;
-            end_states[tag[sequence.len()-1]] += 1.0;
+            self.b[tag[sequence.len()-1].unwrap()][&sequence[sequence.len()-1][..]] += 1.0;
+            seen_states[tag[sequence.len()-1].unwrap()] += 1.0;
+            end_states[tag[sequence.len()-1].unwrap()] += 1.0;
         }
 
         for state in 0..nstates {

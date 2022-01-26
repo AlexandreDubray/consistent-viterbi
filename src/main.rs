@@ -67,6 +67,10 @@ fn main() {
             .long("train")
             .about("If present, the HMM is learned from the data")
             .takes_value(false))
+        .arg(Arg::new("SUPERVISED")
+            .short('s')
+            .long("supervised")
+            .about("If the hmm is learned, this flag indicates to use the supervised learning process"))
         .get_matches();
 
     let mut input_path = PathBuf::from(matches.value_of("INPUT").unwrap());
@@ -81,17 +85,21 @@ fn main() {
 
     println!("Loading data");
     input_path.set_file_name("sequences");
-    let sequences = utils::load_sequences::<2>(&input_path);
+    let sequences = utils::load_sequences::<1>(&input_path);
     input_path.set_file_name("tags");
     let tags = utils::load_tags(&input_path);
     input_path.set_file_name("test_tags");
     let control_tags = utils::load_tags(&input_path);
     let mut constraints = Constraints::from_tags(&control_tags);
 
-    let hmm = match matches.is_present("train") {
+    let hmm = match matches.is_present("TRAIN") {
         true => {
-            let mut h = HMM::new(nstates, [nobs[0], nobs[1]]);
-            h.train(&sequences, &tags, 1000, 0.001);
+            let mut h = HMM::new(nstates, [nobs[0]]);
+            if matches.is_present("SUPERVISED") {
+                h.maximum_likelihood_estimation(&sequences, &tags);
+            } else {
+                h.train(&sequences, &tags, 1000, 0.001);
+            }
             h.write(&mut output_path);
             h
         },
@@ -100,7 +108,7 @@ fn main() {
 
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
     super_seq.recompute_constraints(prop);
-    let nb_run = 10;
+    let nb_run = 1;
     for run in 0..nb_run {
         if prop != 0.0 && prop != 1.0 {
             super_seq.recompute_constraints(prop);

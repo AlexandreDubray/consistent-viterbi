@@ -3,14 +3,14 @@ import os
 import pickle
 import nltk
 
-datasets = ["masc_tagged", "brown", "treebank", "mac_morpho", "conll2000"]
+datasets = ["masc_tagged", "brown", "treebank", "conll2000"]
 nltk.download(datasets)
+nltk.download('universal_tagset')
 
 d = [
     (masc_tagged, 'masc'),
     (brown, 'brown'),
     (treebank, 'treebank'),
-    (mac_morpho, 'mac_morpho'),
     (conll2000, 'conll2000')
 ]
 
@@ -31,7 +31,7 @@ def dump_vector(filename, vector):
         fout.write(','.join(["{:.5f}".format(x) for x in vector]))
 
 def process_corpus(corpus, name):
-    sentences = [x for x in corpus.tagged_sents()]
+    sentences = [x for x in corpus.tagged_sents(tagset='universal')]
     print(len(sentences))
     map_word_int = {}
     next_wid = 0

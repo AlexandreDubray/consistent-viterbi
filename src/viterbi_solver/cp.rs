@@ -130,13 +130,13 @@ impl<'a, const D: usize> CPSolver<'a, D> {
         if comp >= self.constraints.len() {
             self.backtrack(array, bt, ub);
         } else {
-            let positions: Vec<usize> = (0..self.constraints[comp].len()).map(|i| self.constraints[comp][i]).collect();
             for state in 0..self.hmm.nstates() {
                 let mut new_ub = ub;
                 let mut should_bt = false;
                 self.cstr_choices[comp] = Some(state);
-                for pos in &positions {
-                    new_ub = self.partial_viterbi(array, bt, *pos, new_ub);
+                for idx in 0..self.constraints[comp].len() {
+                    let pos = self.constraints[comp][idx];
+                    new_ub = self.partial_viterbi(array, bt, pos, new_ub);
                     if new_ub <= self.best_obj {
                         should_bt = true;
                         break;

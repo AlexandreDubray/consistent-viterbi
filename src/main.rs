@@ -38,12 +38,6 @@ fn main() {
             .about("Path for output")
             .takes_value(true)
             .default_value("."))
-        .arg(Arg::new("HMM")
-            .short('m')
-            .long("model")
-            .about("Path to the serialized HMM model")
-            .takes_value(true)
-            .default_value("hmm.json"))
         .arg(Arg::new("NSTATES")
             .short('n')
             .long("nstates")
@@ -77,7 +71,6 @@ fn main() {
     input_path.push("tmp");
     let mut output_path = PathBuf::from(matches.value_of("OUTPUT").unwrap());
     output_path.push("tmp");
-    let hmm_path = PathBuf::from(matches.value_of("HMM").unwrap());
     let nstates = matches.value_of("NSTATES").unwrap().parse::<usize>().unwrap();
     let nobs: Vec<usize> = matches.values_of("NOBS").unwrap().map(|x| x.parse::<usize>().unwrap()).collect();
     let prop = matches.value_of("PROP").unwrap().parse::<f64>().unwrap();
@@ -85,7 +78,7 @@ fn main() {
 
     println!("Loading data");
     input_path.set_file_name("sequences");
-    let sequences = utils::load_sequences::<1>(&input_path);
+    let sequences = utils::load_sequences::<2>(&input_path);
     input_path.set_file_name("tags");
     let tags = utils::load_tags(&input_path);
     input_path.set_file_name("test_tags");
@@ -94,16 +87,19 @@ fn main() {
 
     let hmm = match matches.is_present("TRAIN") {
         true => {
-            let mut h = HMM::new(nstates, [nobs[0]]);
+            let mut h = HMM::new(nstates, [nobs[0], nobs[1]]);
             if matches.is_present("SUPERVISED") {
                 h.maximum_likelihood_estimation(&sequences, &tags);
             } else {
                 h.train(&sequences, &tags, 1000, 0.001);
             }
-            h.write(&mut output_path);
+            h.write(&mut input_path);
             h
         },
-        false => HMM::from_json(&hmm_path)
+        false => {
+            input_path.set_file_name("hmm.json");
+            HMM::from_json(&input_path)
+        }
     };
 
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
@@ -113,8 +109,8 @@ fn main() {
         if prop != 0.0 && prop != 1.0 {
             super_seq.recompute_constraints(prop);
         }
-        //let mut solver = CPSolver::new(&hmm, &super_seq);
-        let mut solver = IPSolver::new(&hmm, &super_seq);
+        let mut solver = CPSolver::new(&hmm, &super_seq);
+        //let mut solver = IPSolver::new(&hmm, &super_seq);
         //let mut solver = DPSolver::new(&hmm, &super_seq);
         println!("[{} EXP {}] Run {}/{}", solver.get_name(),  prop, run+1, nb_run);
         let start = Instant::now();

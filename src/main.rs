@@ -19,6 +19,7 @@ use viterbi_solver::utils::SuperSequence;
 use viterbi_solver::constraints::Constraints;
 use viterbi_solver::cp::CPSolver;
 use viterbi_solver::Solver;
+use viterbi_solver::cfn::write_cfn;
 
 
 fn main() {
@@ -78,7 +79,7 @@ fn main() {
 
     println!("Loading data");
     input_path.set_file_name("sequences");
-    let sequences = utils::load_sequences::<2>(&input_path);
+    let sequences = utils::load_sequences::<1>(&input_path);
     input_path.set_file_name("tags");
     let tags = utils::load_tags(&input_path);
     input_path.set_file_name("test_tags");
@@ -87,7 +88,7 @@ fn main() {
 
     let hmm = match matches.is_present("TRAIN") {
         true => {
-            let mut h = HMM::new(nstates, [nobs[0], nobs[1]]);
+            let mut h = HMM::new(nstates, [nobs[0]]);
             if matches.is_present("SUPERVISED") {
                 h.maximum_likelihood_estimation(&sequences, &tags);
             } else {
@@ -104,6 +105,8 @@ fn main() {
 
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
     super_seq.recompute_constraints(prop);
+    write_cfn(&hmm, &super_seq, &mut output_path);
+    /*
     let nb_run = 1;
     for run in 0..nb_run {
         if prop != 0.0 && prop != 1.0 {
@@ -115,14 +118,16 @@ fn main() {
         println!("[{} EXP {}] Run {}/{}", solver.get_name(),  prop, run+1, nb_run);
         let start = Instant::now();
         solver.solve();
-        let elapsed = start.elapsed().as_secs();
+        let elapsed = start.elapsed().as_millis();
 
         output_path.set_file_name(format!("{}_{}", prop, run));
         let mut file = File::create(&output_path).unwrap();
-        file.write_all(format!("{}\n{}\n", solver.get_objective(), elapsed).as_bytes()).unwrap();
+        //file.write_all(format!("{}\n{}\n", solver.get_objective(), elapsed).as_bytes()).unwrap();
+        file.write_all(format!("{} {}\n{}\n", solver.get_objective(), solver.get_explored_nodes(), elapsed).as_bytes()).unwrap();
         let solution = solver.get_solution();
         for v in solution {
             file.write_all(format!("{}\n", v).as_bytes()).unwrap();
         }
     }
+    */
 }

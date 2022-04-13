@@ -6,6 +6,7 @@ pub mod dp;
 pub mod utils;
 pub mod viterbi;
 pub mod cp;
+pub mod cfn;
 
 pub trait Solver {
     fn solve(&mut self);

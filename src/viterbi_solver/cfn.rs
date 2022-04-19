@@ -6,6 +6,7 @@ use ndarray_stats::QuantileExt;
 use std::io::Write;
 use std::fs::File;
 use std::path::PathBuf;
+use std::time::Instant;
 
 fn longest_path<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a SuperSequence<'a, D>, array: &mut Array2<f64>, t_from: usize, n_from: usize, t_to: usize, n_to: usize) -> f64 {
     array.row_mut(0).fill(f64::NEG_INFINITY);
@@ -78,7 +79,8 @@ fn get_unary_end_cost<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a SuperSe
     })
 }
 
-pub fn write_cfn<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a SuperSequence<'a, D>, outpath: &mut PathBuf) {
+pub fn write_cfn<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a SuperSequence<'a, D>, outpath: &mut PathBuf, problem_fn: String) -> u128 {
+    let start = Instant::now();
     let k = sequence.number_constraints();
     let mut constraint_boundaries: Vec<(usize, usize)> = Vec::new();
 
@@ -144,6 +146,8 @@ pub fn write_cfn<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a SuperSequenc
     let end_cost = get_unary_end_cost(hmm, sequence, &mut array, l_time);
     unary_costs[l_cid] += &end_cost;
 
+    let compilation_time = start.elapsed().as_millis();
+
     let mut lower_bound = -1.0;
 
     for k1 in 0..k {
@@ -153,8 +157,16 @@ pub fn write_cfn<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a SuperSequenc
         }
     }
 
+    for kk in 0..k {
+        for nn in 0..n {
+            if unary_costs[kk][nn] == f64::NEG_INFINITY {
+                unary_costs[kk][nn] = lower_bound;
+            }
+        }
+    }
 
-    outpath.set_file_name("cfn_problem");
+
+    outpath.set_file_name(&problem_fn);
     let mut file = File::create(outpath).unwrap();
 
     file.write_all(format!("{{\n\tproblem: {{ name: consistent_viterbi, mustbe: >{}}},\n", lower_bound).as_bytes()).unwrap();
@@ -189,6 +201,7 @@ pub fn write_cfn<'a, const D: usize>(hmm: &'a HMM<D>, sequence: &'a SuperSequenc
         }
     }
     file.write_all("\t}\n}".as_bytes()).unwrap();
+    compilation_time
 }
 
 trait ArrayStr {

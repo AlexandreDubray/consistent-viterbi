@@ -105,7 +105,7 @@ fn main() {
 
     let mut super_seq = SuperSequence::from(&sequences, &mut constraints, &hmm);
     super_seq.recompute_constraints(prop);
-    let run_cfn = true;
+    let run_cfn = false;
     let nb_run = 1;
     for run in 0..nb_run {
         output_path.set_file_name(format!("{}_{}", prop, run));
@@ -128,8 +128,8 @@ fn main() {
             //file.write_all(format!("{}\n{}\n", solver.get_objective(), elapsed).as_bytes()).unwrap();
             file.write_all(format!("{} {}\n{}\n", solver.get_objective(), solver.get_explored_nodes(), elapsed).as_bytes()).unwrap();
             let solution = solver.get_solution();
-            for v in solution {
-                file.write_all(format!("{}\n", v).as_bytes()).unwrap();
+            for i in 0..solution.len() {
+                file.write_all(format!("{} {}\n", super_seq[i].seq, solution[i]).as_bytes()).unwrap();
             }
         }
     }

@@ -40,6 +40,10 @@ impl<'a, const D: usize> CPSolver<'a, D> {
             bt[[from, node]] = sfrom;
         }
 
+        if from + 1 < self.sequence.len() && self.sequence[from+1].is_constrained() && self.cstr_choices[self.sequence[from+1].constraint_component as usize].is_some() {
+            bt[[from+1, self.cstr_choices[self.sequence[from+1].constraint_component as usize].unwrap()]] = node;
+        }
+
         let mut t = from + 1;
         while t < self.sequence.len() && !(self.sequence[t].is_constrained() && self.cstr_choices[self.sequence[t].constraint_component as usize].is_some()) {
             for state in 0..self.hmm.nstates() {
@@ -110,8 +114,8 @@ impl<'a, const D: usize> CPSolver<'a, D> {
                     }
                 }
             }
-            if ub >= self.best_obj {
-                if comp < self.constraints.len() {
+            if ub > self.best_obj {
+                if comp + 1 < self.constraints.len() {
                     self.solve_r(array, bt, comp+1);
                 } else {
                     self.backtrack(array, bt, ub);
@@ -130,7 +134,12 @@ impl<'a, const D: usize> Solver for CPSolver<'a, D> {
         let mut array = Array2::from_elem((self.sequence.len(), self.hmm.nstates()), 0.0);
         let mut bt = Array2::from_elem((self.sequence.len(), self.hmm.nstates()), 0);
         self.init_viterbi(&mut array, &mut bt);
-        self.solve_r(&mut array, &mut bt, 0);
+        if self.constraints.len() > 0 {
+            self.solve_r(&mut array, &mut bt, 0);
+        } else {
+            let obj = *array.row(self.sequence.len()-1).max().unwrap();
+            self.backtrack(&mut array, &mut bt, obj);
+        }
     }
 
     fn get_solution(&self) -> &Array1<usize> {
